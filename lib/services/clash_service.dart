@@ -23,82 +23,96 @@ class ClashService {
       final prefs = await SharedPreferences.getInstance();
       String configContent = prefs.getString('cached_config_content') ?? '';
 
-      // Force External Controller Config
-      // Remove existing conflicting keys to avoid ambiguity
-      configContent = configContent.replaceAll(
-          RegExp(r'^external-controller:.*$', multiLine: true), '');
-      configContent =
-          configContent.replaceAll(RegExp(r'^secret:.*$', multiLine: true), '');
-      configContent = configContent.replaceAll(
-          RegExp(r'^log-level:.*$', multiLine: true), '');
-      configContent = configContent.replaceAll(
-          RegExp(r'^log-file:.*$', multiLine: true), '');
-      // Use Support Directory (files/clash) for logs to match HomeDir
+      // Helper to remove top-level keys safely (handling indentation)
+      String removeKey(String content, String key) {
+        return content.replaceAll(
+            RegExp(r'^' + key + r':(?:[ \t].*|)\n(?:[ \t]+.*\n)*',
+                multiLine: true),
+            '');
+      }
+
+      // 1. Strip conflicting keys to clean the slate
+      configContent = removeKey(configContent, 'external-controller');
+      configContent = removeKey(configContent, 'secret');
+      configContent = removeKey(configContent, 'log-level');
+      configContent = removeKey(configContent, 'log-file');
+      configContent = removeKey(configContent, 'ipv6');
+      configContent = removeKey(configContent, 'tun');
+      configContent = removeKey(configContent, 'dns');
+      configContent = removeKey(configContent, 'mode');
+      configContent = removeKey(configContent, 'allow-lan');
+      configContent = removeKey(configContent, 'unified-delay');
+      configContent = removeKey(configContent, 'global-client-fingerprint');
+
+      // 2. Determine Log Path
       final supportDir = await getApplicationSupportDirectory();
       final logPath = '${supportDir.path}/clash/clash_core.log';
-      print('Calculated Log Path: $logPath');
 
-      // Enforce DNS requirements for VPN mode (inject into existing dns block or add new)
-      if (configContent.contains(RegExp(r'^dns:', multiLine: true))) {
-        configContent = configContent.replaceFirst(
-            RegExp(r'^dns:', multiLine: true),
-            'dns:\n  listen: 0.0.0.0:1053\n  enhanced-mode: fake-ip');
-      } else {
-        configContent = '''
-dns:
-  enable: true
-  listen: 0.0.0.0:1053
-  enhanced-mode: fake-ip
-  nameserver:
-    - 223.5.5.5
-    - 8.8.8.8
-$configContent
-''';
-      }
-
-      // Enforce DNS requirements for VPN mode (inject into existing dns block or add new)
-      if (configContent.contains(RegExp(r'^dns:', multiLine: true))) {
-        configContent = configContent.replaceFirst(
-            RegExp(r'^dns:', multiLine: true),
-            'dns:\n    listen: 0.0.0.0:1053\n    enhanced-mode: fake-ip');
-      } else {
-        configContent = '''
-dns:
-  enable: true
-  listen: 0.0.0.0:1053
-  enhanced-mode: fake-ip
-  nameserver:
-    - 223.5.5.5
-    - 8.8.8.8
-$configContent
-''';
-      }
-
-      // Prepend our forced config (127.0.0.1 for binding, debug logs)
-      // Note: tun is managed by the native layer (startTUN), so we disable it in YAML to avoid conflict.
-      configContent = '''
+      // 3. Construct the Header (Infrastructure)
+      // Note: We disable 'tun' here because it is managed by the native layer.
+      final String infrastructureConfig = '''
 external-controller: 127.0.0.1:9090
 secret: ''
 log-level: debug
 log-file: '$logPath'
 ipv6: false
+allow-lan: false
+mode: rule
+unified-delay: true
+global-client-fingerprint: chrome
 tun:
   enable: false
   stack: gvisor
-  auto-route: true
-  auto-detect-interface: true
+  auto-route: false
   dns-hijack:
     - 8.8.8.8:53
     - tcp://8.8.8.8:53
-$configContent
+    - 172.19.0.2:53
+    - tcp://172.19.0.2:53
+    - 1.1.1.1:53
+    - tcp://1.1.1.1:53
+
+sniffer:
+  enable: true
+  sniff:
+    TLS:
+      ports: [443]
+    HTTP:
+      ports: [80, 8080-8880]
 ''';
 
-      // Save config in the same directory as resources (files/clash)
-      final clashDir = Directory('${supportDir.path}/clash');
-      if (!await clashDir.exists()) {
-        await clashDir.create(recursive: true);
+      // 4. Construct DNS (Crucial for Mobile/Fake-IP)
+      const String dnsConfig = '''
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  default-nameserver:
+    - 223.5.5.5
+    - 8.8.8.8
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+  fallback:
+    - https://1.0.0.1/dns-query
+    - tls://8.8.4.4:853
+  fallback-filter:
+    geoip: true
+    ipcidr:
+      - 240.0.0.0/4
+''';
+
+      // 5. Merge
+      configContent = '$infrastructureConfig\n$dnsConfig\n$configContent';
+
+      // Save config
+      final supportDirDir = Directory('${supportDir.path}/clash');
+      if (!await supportDirDir.exists()) {
+        await supportDirDir.create(recursive: true);
       }
-      final configFile = File('${clashDir.path}/config.yaml');
+      final configFile = File('${supportDir.path}/clash/config.yaml');
       await configFile.writeAsString(configContent);
 
       print('Config Path: ${configFile.path}');
@@ -107,10 +121,46 @@ $configContent
       _isRunning = true;
       print(
           'Core Started via MethodChannel with Config File: ${configFile.path}');
+
+      // Start Log Tailing
+      _startLogTailing(File(logPath));
     } catch (e) {
       print('Failed to start core: $e');
       _isRunning = true; // Still mock running state for UI
     }
+  }
+
+  void _startLogTailing(File logFile) {
+    print('Starting Log Tailing for: ${logFile.path}');
+    int lastSize = 0;
+    if (logFile.existsSync()) {
+      lastSize = logFile.lengthSync();
+    }
+
+    // Check every 2 seconds
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 2));
+      if (!_isRunning) return false;
+
+      if (await logFile.exists()) {
+        final length = await logFile.length();
+        if (length > lastSize) {
+          try {
+            final stream = logFile.openRead(lastSize, length);
+            stream
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())
+                .listen((line) {
+              print('[Clash Core] $line');
+            });
+            lastSize = length;
+          } catch (e) {
+            print('Log Read Error: $e');
+          }
+        }
+      }
+      return _isRunning;
+    });
   }
 
   Future<void> stop() async {

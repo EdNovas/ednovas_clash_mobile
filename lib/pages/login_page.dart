@@ -142,7 +142,7 @@ class _LoginPageState extends State<LoginPage> {
                         style: GoogleFonts.outfit(color: Colors.grey[500])),
                   ),
                   TextButton(
-                    onPressed: () => _launchAuthPage('/#/forget'),
+                    onPressed: () => _launchAuthPage('/#/reset-password'),
                     child: Text('Forgot Password?',
                         style: GoogleFonts.outfit(color: Colors.grey[500])),
                   ),

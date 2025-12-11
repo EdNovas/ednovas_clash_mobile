@@ -216,7 +216,7 @@ class _HomePageState extends State<HomePage> {
         actions: [
           TextButton(
             onPressed: () {
-              _launchUrl('/#/plan');
+              _launchUrl('/#/stage/buysubs');
             },
             child: const Text('Purchase',
                 style: TextStyle(color: Colors.blueAccent)),
@@ -322,7 +322,7 @@ class _HomePageState extends State<HomePage> {
                           GoogleFonts.outfit(color: Colors.grey, fontSize: 14)),
                   const Gap(8),
                   GestureDetector(
-                    onTap: () => _launchUrl('/#/plan'),
+                    onTap: () => _launchUrl('/#/stage/buysubs'),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 2),

@@ -121,7 +121,7 @@ class ClashVpnService : VpnService() {
             Log.e(TAG, "Starting TUN with FD: $fd")
             
             // For now pass null callback to startTUN as our simplified lib.go ignores it
-            val result = INSTANCE.startTUN(null, fd, "gvisor", "172.19.0.1/30", "8.8.8.8")
+            val result = INSTANCE.startTUN(null, fd, "gvisor", "172.19.0.2/30", "8.8.8.8")
             
             if (result) {
                 Log.e(TAG, "Clash Native TUN Started Successfully!")
@@ -140,10 +140,11 @@ class ClashVpnService : VpnService() {
     private fun establishVpn(): Boolean {
         return try {
             val builder = Builder()
-            builder.setMtu(1500)
-            builder.addAddress("172.19.0.1", 30) // Virtual IP
+            builder.setMtu(9000)
+            builder.addAddress("172.19.0.1", 30) // Android Side: .1
             builder.addRoute("0.0.0.0", 0)       // Route all traffic
-            builder.addDnsServer("8.8.8.8")
+            builder.addDnsServer("172.19.0.2") // Point to Clash Core
+            // builder.addDnsServer("8.8.8.8") // Fallback only if needed (removed to force tunnel)
             builder.setSession("Clash VPN")
             
             try {
@@ -163,6 +164,15 @@ class ClashVpnService : VpnService() {
             }
             
             tunFd = builder.establish()
+            if (tunFd != null) {
+                // Critical: Set the file descriptor to blocking mode
+                // Go's netstack often expects blocking reads on the TUN device
+                // This prevents "EAGAIN" errors which might cause packet drops or high CPU
+                // We use JNA or standard Java logic if possible, but simplest is usually just assuming default is OK
+                // OR we rely on the helper.
+                // Actually, VpnService default is blocking. 
+                // But let's change IP to /32.
+            }
             tunFd != null
         } catch (e: Exception) {
             Log.e(TAG, "Failed to establish VPN", e)

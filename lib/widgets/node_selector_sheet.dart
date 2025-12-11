@@ -212,6 +212,7 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
 
   void _testGroupLatency() async {
     if (_isTesting) return;
+    print('Starting Latency Test...');
     _isTesting = true;
 
     // Check if API is responsive first
@@ -289,15 +290,15 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
             },
           );
 
-          // print('Testing: ${node.name} -> $url');
+          print('Testing: ${node.name} -> $url');
 
           final response =
-              await http.get(url).timeout(const Duration(seconds: 10));
+              await http.get(url).timeout(const Duration(seconds: 3));
 
           if (response.statusCode == 200) {
             final data = json.decode(response.body);
             final delay = data['delay'] as int?;
-            // print('Success [${node.name}]: $delay ms');
+            print('Success [${node.name}]: $delay ms');
             if (mounted && delay != null) {
               setState(() => node.delay = delay);
             }
