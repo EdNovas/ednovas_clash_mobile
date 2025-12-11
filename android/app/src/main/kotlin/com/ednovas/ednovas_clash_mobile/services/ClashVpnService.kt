@@ -145,6 +145,12 @@ class ClashVpnService : VpnService() {
             builder.addRoute("0.0.0.0", 0)       // Route all traffic
             builder.addDnsServer("8.8.8.8")
             builder.setSession("Clash VPN")
+            
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to exclude package: ${e.message}")
+            }
 
             val pendingIntent = PendingIntent.getActivity(
                 this, 0, Intent(this, MainActivity::class.java),

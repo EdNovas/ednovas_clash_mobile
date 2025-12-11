@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:modal_bottom_sheet/modal_bottom_sheet.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/clash_service.dart';
@@ -127,6 +128,11 @@ class _HomePageState extends State<HomePage> {
           // Check if valid subscription (plan_id exists)
           if (userData['plan_id'] != null) {
             _hasValidSubscription = true;
+          } else {
+            _hasValidSubscription = false;
+            if (mounted && !isPolling) {
+              Future.delayed(Duration.zero, () => _showNoSubscriptionDialog());
+            }
           }
         });
       }
@@ -186,53 +192,44 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _showNodeSelector() {
-    // Filter groups based on mode
-    List<ProxyGroup> currentGroups = _proxyGroups;
-    if (_clashMode == 'Global') {
-      currentGroups =
-          _proxyGroups.where((g) => g.name.toLowerCase() == 'global').toList();
+  Future<void> _launchUrl(String path) async {
+    final url = Uri.parse('${_api.baseUrl ?? 'https://new.ednovas.dev'}$path');
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not launch $url')));
+      }
     }
+  }
 
-    // If empty (e.g. no GLOBAL found), fallback to all or show empty
-    if (currentGroups.isEmpty && _clashMode == 'Global') {
-      // Fallback just in case standard GLOBAL isn't named exactly 'Global'
-      // Maybe user configuration uses different name. We'll show all but user should know.
-    }
-
-    showMaterialModalBottomSheet(
+  void _showNoSubscriptionDialog() {
+    showDialog(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => NodeSelectorSheet(
-        groups: currentGroups,
-        onNodeSelected: (groupName, nodeName) async {
-          // 1. Call Data Service to update state (Optimistic)
-          await _clash.changeProxy(groupName, nodeName);
-
-          // 2. User feedback (Top SnackBar)
-          if (mounted) {
-            ScaffoldMessenger.of(context).clearSnackBars();
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(
-                'Switched to $nodeName',
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-              ),
-              behavior: SnackBarBehavior.floating,
-              margin: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).size.height - 150,
-                  left: 20,
-                  right: 20),
-              duration: const Duration(seconds: 1),
-              backgroundColor: Colors.black87,
-            ));
-          }
-        },
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF252525),
+        title: const Text('No Subscription',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text(
+            'You do not have a valid subscription. Please purchase a plan to use the service.',
+            style: TextStyle(color: Colors.grey)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _launchUrl('/#/plan');
+            },
+            child: const Text('Purchase',
+                style: TextStyle(color: Colors.blueAccent)),
+          ),
+          TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _logout();
+              },
+              child: const Text('Logout', style: TextStyle(color: Colors.red))),
+        ],
       ),
-    ).then((_) {
-      // When sheet closes, refresh main page to sync any other visuals
-      // _fetchUserInfo(); // Optional, enabled if needed
-      setState(() {});
-    });
+    );
   }
 
   @override
@@ -318,8 +315,32 @@ class _HomePageState extends State<HomePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('My Plan',
-                  style: GoogleFonts.outfit(color: Colors.grey, fontSize: 14)),
+              Row(
+                children: [
+                  Text('My Plan',
+                      style:
+                          GoogleFonts.outfit(color: Colors.grey, fontSize: 14)),
+                  const Gap(8),
+                  GestureDetector(
+                    onTap: () => _launchUrl('/#/plan'),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.blueAccent.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: Colors.blueAccent.withOpacity(0.5)),
+                      ),
+                      child: Text('Renew',
+                          style: GoogleFonts.outfit(
+                              color: Colors.blueAccent,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
               Text('Expire: $expireDate',
                   style: GoogleFonts.outfit(color: Colors.grey, fontSize: 14)),
             ],
@@ -357,20 +378,27 @@ class _HomePageState extends State<HomePage> {
   bool _isStarting = false;
 
   void _toggleConnect() async {
-    if (_isStarting) return; // Prevent double tap
+    print(
+        'Toggle Connect Clicked. isStarting: $_isStarting, isConnected: $_isConnected'); // LOG
+    if (_isStarting) {
+      print('Ignored due to isStarting=true');
+      return;
+    }
 
-    // Check for valid subscription before starting
-    if (!_isConnected && !_hasValidSubscription) {
+    // Check for valid subscription and groups before starting
+    if (!_isConnected && (!_hasValidSubscription || _proxyGroups.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please update subscription first!'),
-          backgroundColor: Colors.red,
+          content: Text('Wait for subscription to load...'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 1),
         ),
       );
       return;
     }
 
     setState(() => _isStarting = true);
+    print('State set to Starting...');
 
     try {
       // Wait a bit to simulate "startup" or wait for actual method channel
@@ -378,15 +406,20 @@ class _HomePageState extends State<HomePage> {
           const Duration(milliseconds: 500)); // UI feedback buffer
 
       if (_isConnected) {
+        print('Calling Stop...');
         await _clash.stop();
+        print('Stop called.');
       } else {
+        print('Calling Start...');
         await _clash.start();
+        print('Start called.');
       }
 
       if (mounted) {
         setState(() {
           _isConnected = !_isConnected;
         });
+        print('State toggled to: $_isConnected');
       }
     } catch (e) {
       print('Toggle connect error: $e');
@@ -398,101 +431,76 @@ class _HomePageState extends State<HomePage> {
     } finally {
       if (mounted) {
         setState(() => _isStarting = false);
+        print('isStarting reset to false');
       }
     }
   }
 
   Widget _buildConnectButton() {
+    final bool canConnect = _hasValidSubscription && _proxyGroups.isNotEmpty;
+    // If not connected and cannot connect, show disabled grey.
+    // If connected, show gradient.
+    // If not connected but can connect, show dark grey gradient.
+    final List<Color> colors = _isConnected
+        ? [Colors.blueAccent, Colors.purpleAccent]
+        : (canConnect
+            ? [const Color(0xFF333333), const Color(0xFF222222)]
+            : [Colors.grey[800]!, Colors.grey[900]!]);
+
     return GestureDetector(
       onTap: _toggleConnect,
-      child: Container(
-        width: 200,
-        height: 200,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: LinearGradient(
-            colors: _isConnected
-                ? [Colors.blueAccent, Colors.purpleAccent]
-                : [const Color(0xFF333333), const Color(0xFF222222)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+      behavior: HitTestBehavior.translucent, // Ensure taps are caught
+      child: Animate(
+        target: _isStarting ? 1 : 0,
+        effects: [
+          ScaleEffect(
+              begin: const Offset(1, 1),
+              end: const Offset(1.05, 1.05),
+              duration: 800.ms,
+              curve: Curves.easeInOut)
+        ],
+        onPlay: (controller) => controller.repeat(reverse: true),
+        child: Container(
+          width: 200,
+          height: 200,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              colors: colors,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _isConnected || _isStarting
+                    ? Colors.blueAccent.withOpacity(0.4)
+                    : (canConnect ? Colors.black26 : Colors.transparent),
+                blurRadius: _isStarting ? 50 : 30,
+                spreadRadius: _isStarting ? 10 : 5,
+              )
+            ],
           ),
-          boxShadow: [
-            BoxShadow(
-              color: _isConnected || _isStarting
-                  ? Colors.blueAccent.withOpacity(0.4)
-                  : Colors.black26,
-              blurRadius: _isStarting ? 50 : 30, // Larger glow when starting
-              spreadRadius: _isStarting ? 10 : 5,
-            )
-          ],
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            if (_isStarting)
-              SizedBox(
-                width: 200,
-                height: 200,
-                child: CircularProgressIndicator(
-                    color: Colors.white.withOpacity(0.3), strokeWidth: 2),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (_isStarting)
+                SizedBox(
+                  width: 200,
+                  height: 200,
+                  child: CircularProgressIndicator(
+                      color: Colors.white.withOpacity(0.3), strokeWidth: 2),
+                ),
+              Icon(
+                Icons.power_settings_new,
+                size: 80,
+                color: (_isConnected || _isStarting)
+                    ? Colors.white
+                    : (canConnect ? Colors.grey[700] : Colors.grey[800]),
               ),
-            Icon(
-              Icons.power_settings_new,
-              size: 80,
-              color: (_isConnected || _isStarting)
-                  ? Colors.white
-                  : Colors.grey[700],
-            )
-                .animate(target: _isStarting ? 1 : 0)
-                .scale(
-                    begin: const Offset(1, 1),
-                    end: const Offset(1.1, 1.1),
-                    duration: 1000.ms,
-                    curve: Curves.easeInOut)
-                .callback(
-                    callback:
-                        (_) {}) // placeholder to keep it loop-friendly if we wanted
-          ],
+            ],
+          ),
         ),
       ),
-    )
-        .animate(
-            target: _isStarting ? 1 : 0,
-            onPlay: (controller) => controller.repeat(reverse: true))
-        .scaleXY(
-            end: 1.05,
-            duration: 800.ms,
-            curve: Curves.easeInOut) // Breathing effect on entire button
-        .then() // Chaining for other effects if needed
-        .animate(target: _isConnected ? 1 : 0)
-        .custom(
-      builder: (context, value, child) {
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            child!,
-            if (_isConnected && !_isStarting)
-              Container(
-                width: 250,
-                height: 250,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                      color: Colors.blueAccent
-                          .withOpacity((1 - value).clamp(0.0, 1.0)),
-                      width: 2),
-                ),
-              )
-                  .animate(onPlay: (controller) => controller.repeat())
-                  .scale(
-                      begin: const Offset(0.8, 0.8),
-                      end: const Offset(1.3, 1.3),
-                      duration: 2000.ms)
-                  .fadeOut(duration: 2000.ms),
-          ],
-        );
-      },
     );
   }
 
@@ -507,50 +515,68 @@ class _HomePageState extends State<HomePage> {
         color: const Color(0xFF252525),
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: modes.map((mode) {
-          final isSelected = _clashMode == mode;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () {
-                setState(() => _clashMode = mode);
-                // TODO: Call API to set mode
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSelected ? Colors.blueAccent : Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: Text(
-                    mode,
-                    style: GoogleFonts.outfit(
-                      color: isSelected ? Colors.white : Colors.grey,
-                      fontWeight: FontWeight.bold,
+      child: Opacity(
+        opacity: _isConnected ? 1.0 : 0.5,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: modes.map((mode) {
+            final isSelected = _clashMode == mode;
+            return Expanded(
+              child: GestureDetector(
+                onTap: _isConnected
+                    ? () {
+                        setState(() => _clashMode = mode);
+                        _clash.changeMode(mode);
+                      }
+                    : () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Start VPN to change mode'),
+                                duration: Duration(seconds: 1)));
+                      },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.blueAccent : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Text(
+                      mode,
+                      style: GoogleFonts.outfit(
+                        color: isSelected ? Colors.white : Colors.grey,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          );
-        }).toList(),
+            );
+          }).toList(),
+        ),
       ),
     ).animate().fadeIn();
   }
 
   Widget _buildNodeSelectorBar() {
-    // Find the main group to display
-    // Logic: First Selector usually. Or name contains "EdNovas"
+    // ... code for bar ...
     ProxyGroup? mainGroup;
     if (_proxyGroups.isNotEmpty) {
-      try {
-        mainGroup = _proxyGroups.firstWhere(
-            (g) => g.type == 'select' || g.name.contains('EdNovas'));
-      } catch (_) {
-        mainGroup = _proxyGroups.first;
+      if (_clashMode == 'Global') {
+        try {
+          mainGroup =
+              _proxyGroups.firstWhere((g) => g.name.toLowerCase() == 'global');
+        } catch (_) {
+          mainGroup = _proxyGroups.first;
+        }
+      } else {
+        try {
+          mainGroup = _proxyGroups.firstWhere(
+              (g) => g.type == 'select' || g.name.contains('EdNovas'));
+        } catch (_) {
+          mainGroup = _proxyGroups.first;
+        }
       }
     }
 
@@ -558,52 +584,110 @@ class _HomePageState extends State<HomePage> {
     final currentNode = mainGroup?.now ?? 'Select Node';
 
     return GestureDetector(
-      onTap: _showNodeSelector,
+      onTap: _isConnected
+          ? () {
+              if (mainGroup != null) _showNodeSelector(mainGroup);
+            }
+          : () {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Please start VPN to select nodes'),
+                duration: Duration(seconds: 1),
+              ));
+            },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 30), // Increased margin
+        margin: const EdgeInsets.only(bottom: 30),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
         decoration: BoxDecoration(
-            color: const Color(0xFF252525),
+            color: _isConnected
+                ? const Color(0xFF252525)
+                : const Color(0xFF1A1A1A),
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white10),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 15,
-                  offset: const Offset(0, 5))
-            ]),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                        color: Colors.blueAccent.withOpacity(0.2),
-                        shape: BoxShape.circle),
-                    child: const Icon(Icons.dns,
-                        color: Colors.blueAccent, size: 20)),
-                const Gap(16),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(currentNode,
-                        style: GoogleFonts.outfit(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16)),
-                    Text(groupName,
-                        style: GoogleFonts.outfit(
-                            color: Colors.grey, fontSize: 13)),
-                  ],
-                ),
-              ],
-            ),
-            const Icon(Icons.expand_more, color: Colors.grey),
-          ],
+            border: Border.all(
+                color: _isConnected
+                    ? Colors.white10
+                    : Colors.white.withOpacity(0.05)),
+            boxShadow: _isConnected
+                ? [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 15,
+                        offset: const Offset(0, 5))
+                  ]
+                : []),
+        child: Opacity(
+          opacity: _isConnected ? 1.0 : 0.4,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                          color: Colors.blueAccent.withOpacity(0.2),
+                          shape: BoxShape.circle),
+                      child: const Icon(Icons.dns,
+                          color: Colors.blueAccent, size: 20)),
+                  const Gap(16),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(currentNode,
+                          style: GoogleFonts.outfit(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                      Text(groupName,
+                          style: GoogleFonts.outfit(
+                              color: Colors.grey, fontSize: 13)),
+                    ],
+                  ),
+                ],
+              ),
+              const Icon(Icons.expand_more, color: Colors.grey),
+            ],
+          ),
         ),
       ),
     ).animate().fadeIn().slideY(begin: 0.2);
+  }
+
+  void _showNodeSelector(ProxyGroup group) {
+    var groupsToShow = _proxyGroups;
+    if (_clashMode == 'Global') {
+      // Show only EdNovas (main) or groups explicitly named Global
+      groupsToShow =
+          _proxyGroups.where((g) => g.name.toLowerCase() == 'global').toList();
+      // Safety fallback
+      if (groupsToShow.isEmpty && _proxyGroups.isNotEmpty) {
+        groupsToShow = [
+          _proxyGroups.firstWhere((g) => g.type == 'select',
+              orElse: () => _proxyGroups.first)
+        ];
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => NodeSelectorSheet(
+        groups: groupsToShow,
+        onNodeSelected: (groupName, nodeName) async {
+          Navigator.pop(context);
+          try {
+            await _clash.selectProxy(groupName, nodeName);
+            // Optimistic update
+            setState(() {
+              final g = _proxyGroups.firstWhere((g) => g.name == groupName);
+              g.now = nodeName;
+            });
+          } catch (e) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Failed to select node: $e')));
+          }
+        },
+      ),
+    );
   }
 }

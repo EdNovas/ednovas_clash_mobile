@@ -75,7 +75,7 @@ class ConfigParserService {
       // 3. Create Synthetic "Global" Group
       if (allNodesList.isNotEmpty) {
         final globalGroup = ProxyGroup(
-            name: 'Global',
+            name: 'GLOBAL',
             type: 'select',
             nodes: allNodesList,
             now: allNodesList.first.name);

@@ -221,42 +221,49 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
           .timeout(const Duration(seconds: 2));
     } catch (e) {
       print('API Root Check Failed: $e');
-
-      // AGGRESSIVE LOG DUMP
-      try {
-        final supportDir = await getApplicationSupportDirectory();
-        final clashDir = Directory('${supportDir.path}/clash');
-        print('Searching for logs in: ${clashDir.path}');
-
-        if (await clashDir.exists()) {
-          final files = clashDir.listSync();
-          print('Files found (${files.length}):');
-          for (var f in files) {
-            print(
-                ' - ${f.path.split('/').last} (${(await f.stat()).size} bytes)');
-          }
-
-          final logFile = File('${clashDir.path}/clash_core.log');
-          if (await logFile.exists()) {
-            print('>>> CLASH CORE LOG BLOCK START <<<');
-            final content = await logFile.readAsString();
-            // Print in chunks to avoid truncation
-            final lines = content.split('\n');
-            // Print last 100 lines
-            final startIdx = lines.length > 100 ? lines.length - 100 : 0;
-            for (var i = startIdx; i < lines.length; i++) {
-              print(lines[i]);
-            }
-            print('>>> CLASH CORE LOG BLOCK END <<<');
-          } else {
-            print('Log file NOT FOUND in clash dir.');
-          }
-        } else {
-          print('Clash dir does not exist (Flutter view).');
-        }
-      } catch (logErr) {
-        print('Log dump failed: $logErr');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Clash API Unreachable: $e')),
+        );
       }
+      _isTesting = false;
+      return;
+    }
+
+    // AGGRESSIVE LOG DUMP
+    try {
+      final supportDir = await getApplicationSupportDirectory();
+      final clashDir = Directory('${supportDir.path}/clash');
+      print('Searching for logs in: ${clashDir.path}');
+
+      if (await clashDir.exists()) {
+        final files = clashDir.listSync();
+        print('Files found (${files.length}):');
+        for (var f in files) {
+          print(
+              ' - ${f.path.split('/').last} (${(await f.stat()).size} bytes)');
+        }
+
+        final logFile = File('${clashDir.path}/clash_core.log');
+        if (await logFile.exists()) {
+          print('>>> CLASH CORE LOG BLOCK START <<<');
+          final content = await logFile.readAsString();
+          // Print in chunks to avoid truncation
+          final lines = content.split('\n');
+          // Print last 100 lines
+          final startIdx = lines.length > 100 ? lines.length - 100 : 0;
+          for (var i = startIdx; i < lines.length; i++) {
+            print(lines[i]);
+          }
+          print('>>> CLASH CORE LOG BLOCK END <<<');
+        } else {
+          print('Log file NOT FOUND in clash dir.');
+        }
+      } else {
+        print('Clash dir does not exist (Flutter view).');
+      }
+    } catch (logErr) {
+      print('Log dump failed: $logErr');
     }
 
     final group = widget.groups[_selectedGroupIndex];
@@ -270,24 +277,33 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
         if (node.name.isEmpty) return;
 
         try {
-          final encodedName = Uri.encodeComponent(node.name);
-          final url = Uri.parse(
-              'http://127.0.0.1:9090/proxies/$encodedName/delay?timeout=5000&url=http://www.gstatic.com/generate_204');
+          // Use Uri constructor with pathSegments to handle special chars (spaces, slashes) in names automatically
+          final url = Uri(
+            scheme: 'http',
+            host: '127.0.0.1',
+            port: 9090,
+            pathSegments: ['proxies', node.name, 'delay'],
+            queryParameters: {
+              'timeout': '5000',
+              'url': 'http://www.gstatic.com/generate_204'
+            },
+          );
 
-          final response = await http
-              .get(url)
-              .timeout(const Duration(seconds: 10)); // Increased timeout
+          // print('Testing: ${node.name} -> $url');
+
+          final response =
+              await http.get(url).timeout(const Duration(seconds: 10));
 
           if (response.statusCode == 200) {
             final data = json.decode(response.body);
             final delay = data['delay'] as int?;
+            // print('Success [${node.name}]: $delay ms');
             if (mounted && delay != null) {
               setState(() => node.delay = delay);
             }
           } else {
-            print('Latency Error [${node.name}]: ${response.statusCode}');
-            // If API Error (e.g. 500, 502), maybe print logs too?
-            // Better not spam, the root check handles the major "not running" case.
+            print(
+                'Latency Error [${node.name}]: Status ${response.statusCode}, Body: ${response.body}');
             if (mounted) setState(() => node.delay = -1);
           }
         } catch (e) {

@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
@@ -36,12 +38,58 @@ class ClashService {
       final logPath = '${supportDir.path}/clash/clash_core.log';
       print('Calculated Log Path: $logPath');
 
-      // Prepend our forced config (0.0.0.0 for binding, debug logs)
+      // Enforce DNS requirements for VPN mode (inject into existing dns block or add new)
+      if (configContent.contains(RegExp(r'^dns:', multiLine: true))) {
+        configContent = configContent.replaceFirst(
+            RegExp(r'^dns:', multiLine: true),
+            'dns:\n  listen: 0.0.0.0:1053\n  enhanced-mode: fake-ip');
+      } else {
+        configContent = '''
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  nameserver:
+    - 223.5.5.5
+    - 8.8.8.8
+$configContent
+''';
+      }
+
+      // Enforce DNS requirements for VPN mode (inject into existing dns block or add new)
+      if (configContent.contains(RegExp(r'^dns:', multiLine: true))) {
+        configContent = configContent.replaceFirst(
+            RegExp(r'^dns:', multiLine: true),
+            'dns:\n    listen: 0.0.0.0:1053\n    enhanced-mode: fake-ip');
+      } else {
+        configContent = '''
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  nameserver:
+    - 223.5.5.5
+    - 8.8.8.8
+$configContent
+''';
+      }
+
+      // Prepend our forced config (127.0.0.1 for binding, debug logs)
+      // Note: tun is managed by the native layer (startTUN), so we disable it in YAML to avoid conflict.
       configContent = '''
-external-controller: 0.0.0.0:9090
+external-controller: 127.0.0.1:9090
 secret: ''
 log-level: debug
 log-file: '$logPath'
+ipv6: false
+tun:
+  enable: false
+  stack: gvisor
+  auto-route: true
+  auto-detect-interface: true
+  dns-hijack:
+    - 8.8.8.8:53
+    - tcp://8.8.8.8:53
 $configContent
 ''';
 
@@ -133,23 +181,58 @@ $configContent
             ));
   }
 
-  // Simulate changing proxy node for a group
-  Future<void> changeProxy(String groupName, String nodeName) async {
-    // 1. Find group index
+  // Update local memory cache only
+  void _updateLocalCache(String groupName, String nodeName) {
     final index = _cachedGroups.indexWhere((g) => g.name == groupName);
     if (index == -1) return;
 
-    // 2. Update the 'now' field.
-    // Since ProxyGroup might be immutable, we create a copy with new selection
     final oldGroup = _cachedGroups[index];
     final newGroup = ProxyGroup(
         name: oldGroup.name,
         type: oldGroup.type,
         nodes: oldGroup.nodes,
-        now: nodeName // Update selection
-        );
-
-    // 3. Update cache
+        now: nodeName);
     _cachedGroups[index] = newGroup;
+  }
+
+  // Call Clash API to change proxy
+  Future<void> selectProxy(String groupName, String nodeName) async {
+    try {
+      final encodedGroup = Uri.encodeComponent(groupName);
+      final url = Uri.parse('http://127.0.0.1:9090/proxies/$encodedGroup');
+
+      final response = await http.put(
+        url,
+        body: json.encode({'name': nodeName}),
+      );
+
+      if (response.statusCode != 204) {
+        throw Exception('API Failed: ${response.statusCode} ${response.body}');
+      }
+
+      // Update local cache if API success
+      _updateLocalCache(groupName, nodeName);
+    } catch (e) {
+      print('Select Proxy Failed: $e');
+      rethrow;
+    }
+  }
+
+  // Call Clash API to change mode
+  Future<void> changeMode(String mode) async {
+    try {
+      final url = Uri.parse('http://127.0.0.1:9090/configs');
+      final response = await http.patch(
+        url,
+        body: json.encode({'mode': mode}),
+      );
+      if (response.statusCode != 204) {
+        print('Change Mode Failed: ${response.statusCode} ${response.body}');
+      } else {
+        print('Mode changed to $mode');
+      }
+    } catch (e) {
+      print('Change Mode Error: $e');
+    }
   }
 }

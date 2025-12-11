@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import 'home_page.dart';
 
@@ -58,10 +59,21 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+        const SnackBar(
+            content: Text('Account or password error'),
+            backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _launchAuthPage(String path) async {
+    final baseUrl = _api.baseUrl ?? 'https://new.ednovas.dev';
+    final url = Uri.parse('$baseUrl$path');
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not launch $url')));
     }
   }
 
@@ -117,6 +129,24 @@ class _LoginPageState extends State<LoginPage> {
                           style: GoogleFonts.outfit(
                               fontSize: 18, color: Colors.white)),
                 ),
+              ).animate().fadeIn().moveY(begin: 20),
+
+              const Gap(20),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton(
+                    onPressed: () => _launchAuthPage('/#/register'),
+                    child: Text('Register',
+                        style: GoogleFonts.outfit(color: Colors.grey[500])),
+                  ),
+                  TextButton(
+                    onPressed: () => _launchAuthPage('/#/forget'),
+                    child: Text('Forgot Password?',
+                        style: GoogleFonts.outfit(color: Colors.grey[500])),
+                  ),
+                ],
               ).animate().fadeIn().moveY(begin: 20),
             ],
           ),
