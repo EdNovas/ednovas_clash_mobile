@@ -8,17 +8,21 @@ import com.ednovas.ednovas_clash_mobile.services.ClashVpnService
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.ednovas.clash/vpn"
+    private var pendingConfigPath: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             if (call.method == "start") {
+                val configPath = call.argument<String>("config_path") ?: ""
                 val intent = android.net.VpnService.prepare(this)
                 if (intent != null) {
+                    pendingConfigPath = configPath
                     startActivityForResult(intent, 0)
+                    // Don't return error, just waiting for user interaction. 
+                    // Or return error so Flutter knows permission is being asked.
                     result.error("PERMISSION_REQUIRED", "VPN Permission required", null)
                 } else {
-                    val configPath = call.argument<String>("config_path") ?: ""
                     startVpnService(configPath)
                     result.success("VPN Started")
                 }
@@ -27,6 +31,9 @@ class MainActivity : FlutterActivity() {
                 intent.action = ClashVpnService.ACTION_STOP
                 startService(intent)
                 result.success("VPN Stopped")
+            } else if (call.method == "status") {
+                val isRunning = ClashVpnService.isRunning
+                result.success(isRunning)
             } else {
                 result.notImplemented()
             }
@@ -46,11 +53,11 @@ class MainActivity : FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 0 && resultCode == android.app.Activity.RESULT_OK) {
-            // How to get config here? We lost it.
-            // Simplified: Just restart without config or cache it. 
-            // Ideally we need to store pending config.
-            // For now, passing empty string to avoid crash, user might need to click again.
-            startVpnService("") 
+            val path = pendingConfigPath ?: ""
+            if (path.isNotEmpty()) {
+                startVpnService(path)
+            }
+            pendingConfigPath = null
         }
     }
 }

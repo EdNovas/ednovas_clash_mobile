@@ -37,6 +37,8 @@ class ClashVpnService : VpnService() {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "ClashVpnServiceChannel"
         
+        var isRunning = false
+
         val INSTANCE: ClashLibrary by lazy {
             Native.load("clash", ClashLibrary::class.java)
         }
@@ -44,7 +46,6 @@ class ClashVpnService : VpnService() {
 
     private var tunFd: ParcelFileDescriptor? = null
     private val TAG = "ClashVpnService"
-    private var isRunning = false
 
     // Keep reference to callback to prevent GC
     private val clashCallback = object : ClashCallback {
@@ -77,8 +78,16 @@ class ClashVpnService : VpnService() {
     private fun startClash(configPath: String) {
         if (isRunning) return
         
-        val homeDir = File(configPath).parentFile
-        val configContent = File(configPath).readText()
+        Log.e(TAG, "Attempting to start Clash with config: $configPath")
+        val configFile = File(configPath)
+        if (!configFile.exists()) {
+             Log.e(TAG, "Config file does not exist: $configPath")
+             stopSelf()
+             return
+        }
+
+        val homeDir = configFile.parentFile
+        val configContent = configFile.readText()
 
         Log.e(TAG, "Initializing Clash Core (JNA Adapted)...")
 

@@ -86,9 +86,12 @@ class _HomePageState extends State<HomePage> {
 
     // Refresh Groups from ClashService (Memory)
     final groups = await _clash.getProxyGroups();
+    final isRunning = await _clash.checkStatus();
+
     if (mounted) {
       setState(() {
         _proxyGroups = groups;
+        _isConnected = isRunning;
         _isLoading = false;
       });
     }
@@ -356,23 +359,46 @@ class _HomePageState extends State<HomePage> {
   void _toggleConnect() async {
     if (_isStarting) return; // Prevent double tap
 
-    setState(() => _isStarting = true);
-
-    // Wait a bit to simulate "startup" or wait for actual method channel
-    await Future.delayed(
-        const Duration(milliseconds: 500)); // UI feedback buffer
-
-    if (_isConnected) {
-      await _clash.stop();
-    } else {
-      await _clash.start();
+    // Check for valid subscription before starting
+    if (!_isConnected && !_hasValidSubscription) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please update subscription first!'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
 
-    if (mounted) {
-      setState(() {
-        _isConnected = !_isConnected;
-        _isStarting = false;
-      });
+    setState(() => _isStarting = true);
+
+    try {
+      // Wait a bit to simulate "startup" or wait for actual method channel
+      await Future.delayed(
+          const Duration(milliseconds: 500)); // UI feedback buffer
+
+      if (_isConnected) {
+        await _clash.stop();
+      } else {
+        await _clash.start();
+      }
+
+      if (mounted) {
+        setState(() {
+          _isConnected = !_isConnected;
+        });
+      }
+    } catch (e) {
+      print('Toggle connect error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isStarting = false);
+      }
     }
   }
 

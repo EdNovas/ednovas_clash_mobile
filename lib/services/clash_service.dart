@@ -75,6 +75,17 @@ $configContent
     }
   }
 
+  Future<bool> checkStatus() async {
+    try {
+      final bool isRunning = await platform.invokeMethod('status');
+      _isRunning = isRunning;
+      return isRunning;
+    } catch (e) {
+      print('Status check failed: $e');
+      return false;
+    }
+  }
+
   // Parse and Save Config
   Future<void> updateConfig(String yamlContent) async {
     final result = await ConfigParserService.parseConfig(yamlContent);
