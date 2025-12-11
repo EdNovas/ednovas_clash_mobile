@@ -121,7 +121,7 @@ class ClashVpnService : VpnService() {
             Log.e(TAG, "Starting TUN with FD: $fd")
             
             // For now pass null callback to startTUN as our simplified lib.go ignores it
-            val result = INSTANCE.startTUN(null, fd, "gvisor", "172.19.0.2/30", "8.8.8.8")
+            val result = INSTANCE.startTUN(null, fd, "gvisor", "172.19.0.1/30", "1.1.1.1")
             
             if (result) {
                 Log.e(TAG, "Clash Native TUN Started Successfully!")
@@ -141,10 +141,9 @@ class ClashVpnService : VpnService() {
         return try {
             val builder = Builder()
             builder.setMtu(9000)
-            builder.addAddress("172.19.0.1", 30) // Android Side: .1
+            builder.addAddress("172.19.0.1", 30)
             builder.addRoute("0.0.0.0", 0)       // Route all traffic
-            builder.addDnsServer("172.19.0.2") // Point to Clash Core
-            // builder.addDnsServer("8.8.8.8") // Fallback only if needed (removed to force tunnel)
+            builder.addDnsServer("1.1.1.1")      // Target for DNS Hijack
             builder.setSession("Clash VPN")
             
             try {

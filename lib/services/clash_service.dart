@@ -61,16 +61,12 @@ mode: rule
 unified-delay: true
 global-client-fingerprint: chrome
 tun:
-  enable: false
+  enable: true              # Must be enabled
   stack: gvisor
-  auto-route: false
+  auto-route: true
+  auto-detect-interface: true
   dns-hijack:
-    - 8.8.8.8:53
-    - tcp://8.8.8.8:53
-    - 172.19.0.2:53
-    - tcp://172.19.0.2:53
     - 1.1.1.1:53
-    - tcp://1.1.1.1:53
 
 sniffer:
   enable: true
