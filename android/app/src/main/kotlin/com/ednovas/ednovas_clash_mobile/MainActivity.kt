@@ -3,7 +3,9 @@ package com.ednovas.ednovas_clash_mobile
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import android.util.Log
+import android.content.Intent
+import android.net.VpnService
+import android.os.Build
 import com.ednovas.ednovas_clash_mobile.services.ClashVpnService
 
 class MainActivity : FlutterActivity() {
@@ -13,48 +15,59 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "start") {
-                val configPath = call.argument<String>("config_path") ?: ""
-                val intent = android.net.VpnService.prepare(this)
-                if (intent != null) {
-                    pendingConfigPath = configPath
-                    startActivityForResult(intent, 0)
-                    // Don't return error, just waiting for user interaction. 
-                    // Or return error so Flutter knows permission is being asked.
-                    result.error("PERMISSION_REQUIRED", "VPN Permission required", null)
-                } else {
-                    startVpnService(configPath)
-                    result.success("VPN Started")
+            when (call.method) {
+                "start" -> {
+                    val configPath = call.argument<String>("config_path")
+                    if (configPath == null) {
+                        result.error("INVALID_ARGUMENT", "Config path is null", null)
+                        return@setMethodCallHandler
+                    }
+
+                    val intent = VpnService.prepare(this)
+                    if (intent != null) {
+                        // Permission required
+                        pendingConfigPath = configPath
+                        startActivityForResult(intent, 0)
+                        result.error("PERMISSION_REQUIRED", "VPN Permission required", null)
+                    } else {
+                        // Permission granted
+                        startVpnService(configPath)
+                        result.success(true)
+                    }
                 }
-            } else if (call.method == "stop") {
-                val intent = android.content.Intent(this, ClashVpnService::class.java)
-                intent.action = ClashVpnService.ACTION_STOP
-                startService(intent)
-                result.success("VPN Stopped")
-            } else if (call.method == "status") {
-                val isRunning = ClashVpnService.isRunning
-                result.success(isRunning)
-            } else {
-                result.notImplemented()
+                "stop" -> {
+                    val intent = Intent(this, ClashVpnService::class.java)
+                    intent.action = ClashVpnService.ACTION_STOP
+                    startService(intent)
+                    result.success(true)
+                }
+                "status" -> {
+                    result.success(ClashVpnService.isRunning)
+                }
+                else -> {
+                    result.notImplemented()
+                }
             }
         }
     }
 
     private fun startVpnService(configPath: String) {
-        val intent = android.content.Intent(this, ClashVpnService::class.java)
+        val intent = Intent(this, ClashVpnService::class.java)
+        intent.action = ClashVpnService.ACTION_START
         intent.putExtra("config_path", configPath)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
     }
-    
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 0 && resultCode == android.app.Activity.RESULT_OK) {
-            val path = pendingConfigPath ?: ""
-            if (path.isNotEmpty()) {
+        if (requestCode == 0 && resultCode == RESULT_OK) {
+            val path = pendingConfigPath
+            if (path != null) {
                 startVpnService(path)
             }
             pendingConfigPath = null

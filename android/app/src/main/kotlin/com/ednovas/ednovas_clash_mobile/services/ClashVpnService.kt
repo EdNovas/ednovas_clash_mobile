@@ -13,21 +13,6 @@ import androidx.core.app.NotificationCompat
 import com.ednovas.ednovas_clash_mobile.MainActivity
 import com.ednovas.ednovas_clash_mobile.R
 import java.io.File
-import com.sun.jna.Callback
-import com.sun.jna.Library
-import com.sun.jna.Native
-import com.sun.jna.Pointer
-import org.json.JSONObject
-
-interface ClashCallback : Callback {
-    fun invoke(result: String)
-}
-
-interface ClashLibrary : Library {
-    fun invokeAction(callback: ClashCallback, params: String)
-    fun startTUN(callback: ClashCallback?, fd: Int, stack: String, address: String, dns: String): Boolean
-    fun stopTun()
-}
 
 class ClashVpnService : VpnService() {
 
@@ -37,144 +22,140 @@ class ClashVpnService : VpnService() {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "ClashVpnServiceChannel"
         
-        var isRunning = false
-
-        val INSTANCE: ClashLibrary by lazy {
-            Native.load("clash", ClashLibrary::class.java)
-        }
+        @Volatile var isRunning = false
     }
 
     private var tunFd: ParcelFileDescriptor? = null
     private val TAG = "ClashVpnService"
 
-    // Keep reference to callback to prevent GC
-    private val clashCallback = object : ClashCallback {
-        override fun invoke(result: String) {
-            Log.d(TAG, "Clash Callback Received: $result")
-        }
+    // JNA Interface definition
+    interface ClashLibrary : com.sun.jna.Library {
+        fun Start(homeDir: String, configContent: String, fd: Int): String?
+        fun startTUN(callback: com.sun.jna.Pointer?, fd: Int, stack: String, address: String, dns: String): Boolean
+        fun Stop(): String?
+    }
+    
+    // Lazy load the library
+    private val clashLib by lazy {
+        com.sun.jna.Native.load("clash", ClashLibrary::class.java)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+        
+        // Handle Stop Action
         if (action == ACTION_STOP) {
             stopVpn()
             return START_NOT_STICKY
         }
 
+        // 1. Immediately start Foreground to keep service alive
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
 
         val configPath = intent?.getStringExtra("config_path")
         if (configPath != null) {
-             startClash(configPath)
+            startClashAsync(configPath)
         } else {
-             Log.e(TAG, "Config path is null")
-             stopSelf()
+            Log.e(TAG, "No config_path provided")
+            stopSelf()
         }
         
         return START_STICKY
     }
     
-    private fun startClash(configPath: String) {
-        if (isRunning) return
-        
-        Log.e(TAG, "Attempting to start Clash with config: $configPath")
-        val configFile = File(configPath)
-        if (!configFile.exists()) {
-             Log.e(TAG, "Config file does not exist: $configPath")
-             stopSelf()
-             return
+    private fun startClashAsync(configPath: String) {
+        if (isRunning) {
+            Log.w(TAG, "Clash is already running")
+            return
         }
+        isRunning = true
+        
+        Thread {
+            Log.d(TAG, "Starting Clash in background thread with config: $configPath")
+            
+            // Validate file
+            val configFile = File(configPath)
+            if (!configFile.exists()) {
+                Log.e(TAG, "Config file not found")
+                stopVpn()
+                return@Thread
+            }
+            
+            val configContent = configFile.readText()
+            val homeDir = configFile.parentFile.absolutePath
 
-        val homeDir = configFile.parentFile
-        val configContent = configFile.readText()
-
-        Log.e(TAG, "Initializing Clash Core (JNA Adapted)...")
-
-        try {
+            // Establish VPN
             if (!establishVpn()) {
-                Log.e(TAG, "Failed to establish VPN")
-                stopSelf()
-                return
+                Log.e(TAG, "VPN Establishment failed")
+                stopVpn()
+                return@Thread
             }
 
-            val initJson = JSONObject()
-            initJson.put("id", "init")
-            initJson.put("method", "initClash")
-            initJson.put("data", homeDir.absolutePath)
-            
-            Log.e(TAG, "Invoking initClash...")
-            // Pass the JNA Callback interface, which JNA converts to a C function pointer
-            INSTANCE.invokeAction(clashCallback, initJson.toString())
-            Log.e(TAG, "Init Sent.")
+            // Start Go Core
+            try {
+                Log.d(TAG, "Calling Native Start (Init Hub)...")
+                // Call Start with fd=0 to only initialize Hub/Config but NOT start TUN
+                val initError = clashLib.Start(homeDir, configContent, 0)
+                if (!initError.isNullOrEmpty()) {
+                    Log.e(TAG, "Native Init returned error: $initError")
+                    stopVpn()
+                    return@Thread
+                }
 
-            val configJson = JSONObject()
-            configJson.put("id", "config")
-            configJson.put("method", "updateConfig")
-            configJson.put("data", configContent)
-            
-            Log.e(TAG, "Invoking updateConfig...")
-            INSTANCE.invokeAction(clashCallback, configJson.toString())
-            Log.e(TAG, "Config Update Sent.")
-
-            val fd = tunFd!!.fd
-            Log.e(TAG, "Starting TUN with FD: $fd")
-            
-            // For now pass null callback to startTUN as our simplified lib.go ignores it
-            val result = INSTANCE.startTUN(null, fd, "gvisor", "172.19.0.1/30", "1.1.1.1")
-            
-            if (result) {
-                Log.e(TAG, "Clash Native TUN Started Successfully!")
-                isRunning = true
-            } else {
-                Log.e(TAG, "Clash Native TUN Start FAILED.")
+                Log.d(TAG, "Calling Native startTUN...")
+                val fd = tunFd!!.fd
+                // Pass explicit parameters to startTUN to verify JNI
+                val success = clashLib.startTUN(null, fd, "lwip", "172.19.0.1/30", "1.1.1.1,8.8.8.8")
+                
+                if (!success) {
+                    Log.e(TAG, "Native startTUN Failed")
+                    stopVpn()
+                } else {
+                    Log.d(TAG, "Clash Core started successfully")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error starting Clash Core: ${e.message}", e)
                 stopVpn()
             }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Native Error: ${e.message}", e)
-            stopVpn()
-        }
+        }.start()
     }
 
     private fun establishVpn(): Boolean {
         return try {
             val builder = Builder()
             builder.setMtu(9000)
-            builder.addAddress("172.19.0.1", 30)
-            builder.addRoute("0.0.0.0", 0)       // Route all traffic
-            builder.addDnsServer("1.1.1.1")      // Target for DNS Hijack
             builder.setSession("Clash VPN")
             
-            try {
-                builder.addDisallowedApplication(packageName)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to exclude package: ${e.message}")
-            }
-
+            // IPv4 Setup
+            builder.addAddress("172.19.0.1", 30)
+            builder.addRoute("0.0.0.0", 0)
+            
+            // IPv6 Setup (Prevent Leak)
+            builder.addAddress("fd00::1", 126)
+            builder.addRoute("::", 0)
+            
+            // DNS
+            builder.addDnsServer("1.1.1.1")
+            
+            // Configure Intent
             val pendingIntent = PendingIntent.getActivity(
                 this, 0, Intent(this, MainActivity::class.java),
                 PendingIntent.FLAG_IMMUTABLE
             )
             builder.setConfigureIntent(pendingIntent)
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                builder.setMetered(false)
+
+            // Attempt to exclude self to avoid loop
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to exclude sensitive app: ${e.message}")
             }
-            
+
             tunFd = builder.establish()
-            if (tunFd != null) {
-                // Critical: Set the file descriptor to blocking mode
-                // Go's netstack often expects blocking reads on the TUN device
-                // This prevents "EAGAIN" errors which might cause packet drops or high CPU
-                // We use JNA or standard Java logic if possible, but simplest is usually just assuming default is OK
-                // OR we rely on the helper.
-                // Actually, VpnService default is blocking. 
-                // But let's change IP to /32.
-            }
             tunFd != null
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to establish VPN", e)
+            Log.e(TAG, "Error building VPN", e)
             false
         }
     }
@@ -182,15 +163,21 @@ class ClashVpnService : VpnService() {
     private fun stopVpn() {
         isRunning = false
         try {
-            INSTANCE.stopTun()
-            tunFd?.close()
-            tunFd = null
-            stopForeground(true)
-            stopSelf()
-            Log.d(TAG, "VPN Stopped")
+            clashLib.Stop()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Error stopping Mobile", e)
         }
+        
+        try {
+            tunFd?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing FD", e)
+        }
+        tunFd = null
+        
+        stopForeground(true)
+        stopSelf()
+        Log.d(TAG, "VPN Service destroyed")
     }
 
     private fun createNotificationChannel() {
@@ -214,9 +201,10 @@ class ClashVpnService : VpnService() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Clash VPN")
-            .setContentText("Service is running")
+            .setContentText("Connected")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
     }
 

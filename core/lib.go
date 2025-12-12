@@ -1,55 +1,172 @@
 package main
 
+/*
+#cgo LDFLAGS: -llog
+#include <android/log.h>
+#include <stdlib.h>
+
+static inline void logToAndroid(const char* tag, const char* msg) {
+	__android_log_print(ANDROID_LOG_INFO, tag, "%s", msg);
+}
+*/
 import "C"
 
 import (
+	"ednovas/clash/core/tun"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"unsafe"
 
-	"github.com/metacubex/mihomo/config"
+	"reflect"
+
 	"github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/hub"
-    // Import features to ensure compilation
-    _ "github.com/metacubex/mihomo/features/dns"
-    _ "github.com/metacubex/mihomo/features/outbound"
+	LC "github.com/metacubex/mihomo/listener/config"
+	"github.com/metacubex/mihomo/listener/sing_tun"
+	"github.com/metacubex/mihomo/log"
 )
 
 var (
-	params *hub.Option
+	tunListener *sing_tun.Listener
+	tunLock     sync.Mutex
+	coreRunning bool
 )
 
+// Log to Android System Log directly
+func androidLog(msg string) {
+	cTag := C.CString("ClashCoreGo")
+	cMsg := C.CString(msg)
+	C.logToAndroid(cTag, cMsg)
+	C.free(unsafe.Pointer(cTag))
+	C.free(unsafe.Pointer(cMsg))
+}
+
 //export Start
-func Start(homeDir *C.char, configContent *C.char) *C.char {
-    goHomeDir := C.GoString(homeDir)
-    goConfigContent := C.GoString(configContent)
+func Start(homeDir *C.char, configContent *C.char, fd C.int) *C.char {
+	hDir := C.GoString(homeDir)
+	cfg := C.GoString(configContent)
+	tunFd := int(fd)
 
-	// 1. Set Home Directory
-	constant.SetHomeDir(goHomeDir)
+	tunLock.Lock()
+	if coreRunning {
+		tunLock.Unlock()
+		return C.CString("Core already running")
+	}
+	coreRunning = true
+	tunLock.Unlock()
 
-	// 2. Write Config
-	configPath := filepath.Join(goHomeDir, "config.yaml")
-	if err := os.WriteFile(configPath, []byte(goConfigContent), 0644); err != nil {
-		return C.CString(fmt.Sprintf("Error writing config: %s", err.Error()))
+	constant.SetHomeDir(hDir)
+	configPath := filepath.Join(hDir, "config.yaml")
+
+	// 1. Write Config
+	if err := os.WriteFile(configPath, []byte(cfg), 0644); err != nil {
+		coreRunning = false
+		return C.CString(fmt.Sprintf("Write Config Error: %s", err.Error()))
 	}
 
-	// 3. Parse Config
-	cfg, err := config.ParseAndBuild(configPath)
+	// 2. Parse Config & Start Hub
+	if err := hub.Parse([]byte(cfg)); err != nil {
+		coreRunning = false
+		return C.CString(fmt.Sprintf("Hub Parse Error: %s", err.Error()))
+	}
+
+	log.Infoln("Clash Core initialized (Hub started)")
+
+	// 3. Start TUN (if FD provided)
+	// 3. Start TUN (if FD provided)
+	if tunFd > 0 {
+		// Hardcode values here for now to preserve existing behavior
+		stack := "gvisor"
+		// address := "172.19.0.1/30"
+		address := "172.19.0.1/30"
+		dns := "1.1.1.1,8.8.8.8"
+
+		if errStr := StartTunWithConfig(tunFd, stack, address, dns); errStr != "" {
+			// Don't kill core, just return error
+			log.Errorln("TUN Start Failed: %s", errStr)
+			return C.CString(fmt.Sprintf("TUN Error: %s", errStr))
+		}
+	}
+
+	log.Infoln("Clash Core fully started")
+	return C.CString("")
+}
+
+func takeCString(s *C.char) string {
+	if s == nil {
+		return ""
+	}
+	return C.GoString(s)
+}
+
+//export startTUN
+func startTUN(callback unsafe.Pointer, fd C.int, stackChar, addressChar, dnsChar *C.char) bool {
+	s := takeCString(stackChar)
+	androidLog(fmt.Sprintf("JNI received stack: '%s', FD: %d", s, int(fd)))
+
+	addr := takeCString(addressChar)
+	d := takeCString(dnsChar)
+
+	// DEBUG: Inspect LC.Tun struct fields directly here where we have androidLog
+	t := reflect.TypeOf(LC.Tun{})
+	androidLog("DEBUG: Inspecting LC.Tun struct fields:")
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		androidLog(fmt.Sprintf("Field %d: %s (Type: %s)", i, field.Name, field.Type))
+	}
+
+	errStr := StartTunWithConfig(int(fd), s, addr, d)
+	if errStr != "" {
+		androidLog(fmt.Sprintf("startTUN failed: %s", errStr))
+		return false
+	}
+	return true
+}
+
+// StartTunWithConfig starts the TUN interface on the given file descriptor with provided config.
+func StartTunWithConfig(fd int, stack, address, dns string) string {
+	tunLock.Lock()
+	defer tunLock.Unlock()
+
+	if tunListener != nil {
+		tunListener.Close()
+		tunListener = nil
+	}
+
+	msg := fmt.Sprintf("Starting TUN: FD=%d, Stack=%s, Addr=%s, DNS=%s", fd, stack, address, dns)
+	log.Infoln(msg)
+	androidLog(msg)
+
+	listener, err := tun.Start(fd, stack, address, dns)
 	if err != nil {
-		return C.CString(fmt.Sprintf("Config Error: %s", err.Error()))
+		errMsg := fmt.Sprintf("Failed to create TUN listener: %v", err)
+		androidLog(errMsg)
+		return errMsg
 	}
 
-	// 4. Start Hub
-	if err := hub.Parse(cfg); err != nil {
-		return C.CString(fmt.Sprintf("Hub Error: %s", err.Error()))
-	}
-	
-	return C.CString("Clash Core Started (Mihomo/Native)")
+	tunListener = listener
+	log.Infoln("TUN Listener started")
+	androidLog("TUN Listener started successfully")
+	return ""
 }
 
 //export Stop
 func Stop() *C.char {
-	return C.CString("Stopped")
+	tunLock.Lock()
+	defer tunLock.Unlock()
+
+	if tunListener != nil {
+		tunListener.Close()
+		tunListener = nil
+		log.Infoln("TUN Listener closed")
+	}
+
+	// Note: Mihomo doesn't have a global "Stop" for the Hub
+	coreRunning = false
+	log.Infoln("Clash Core stopped")
+	return C.CString("")
 }
 
-func main() {} // Required for c-shared build
+func main() {}

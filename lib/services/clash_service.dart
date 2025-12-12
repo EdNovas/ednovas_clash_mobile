@@ -23,10 +23,17 @@ class ClashService {
       final prefs = await SharedPreferences.getInstance();
       String configContent = prefs.getString('cached_config_content') ?? '';
 
-      // Helper to remove top-level keys safely (handling indentation)
+      if (configContent.isEmpty) {
+        throw Exception(
+            'No configuration found. Please update subscription first.');
+      }
+
+      // Helper to remove top-level keys safely (handling indentation and CRLF)
       String removeKey(String content, String key) {
+        // Matches "key: ..." followed by any number of indented lines or empty lines
         return content.replaceAll(
-            RegExp(r'^' + key + r':(?:[ \t].*|)\n(?:[ \t]+.*\n)*',
+            RegExp(
+                r'^' + key + r':[^\n\r]*(\r?\n|\r)((?:[ \t]+.*|)(\r?\n|\r))*',
                 multiLine: true),
             '');
       }
@@ -49,24 +56,23 @@ class ClashService {
       final logPath = '${supportDir.path}/clash/clash_core.log';
 
       // 3. Construct the Header (Infrastructure)
-      // Note: We disable 'tun' here because it is managed by the native layer.
       final String infrastructureConfig = '''
 external-controller: 127.0.0.1:9090
 secret: ''
-log-level: debug
+log-level: info
 log-file: '$logPath'
 ipv6: false
 allow-lan: false
 mode: rule
 unified-delay: true
 global-client-fingerprint: chrome
+
 tun:
-  enable: true              # Must be enabled
+  enable: true
   stack: gvisor
-  auto-route: true
-  auto-detect-interface: true
-  dns-hijack:
-    - 1.1.1.1:53
+  auto-route: false
+  auto-redirect: false
+  auto-detect-interface: false
 
 sniffer:
   enable: true
@@ -100,8 +106,18 @@ dns:
       - 240.0.0.0/4
 ''';
 
-      // 5. Merge
+      // 5. Merge (Put overrides FIRST to ensure they take precedence if parser uses First-Wins)
       configContent = '$infrastructureConfig\n$dnsConfig\n$configContent';
+
+      // DEBUG: Print final config
+      print(
+          'GENERATED CONFIG HEAD: \n${configContent.substring(0, configContent.length > 500 ? 500 : configContent.length)}');
+      try {
+        print(
+            'GENERATED CONFIG TAIL: \n${configContent.substring(configContent.length > 500 ? configContent.length - 500 : 0)}');
+      } catch (e) {
+        print('Error printing tail: $e');
+      }
 
       // Save config
       final supportDirDir = Directory('${supportDir.path}/clash');
@@ -112,17 +128,49 @@ dns:
       await configFile.writeAsString(configContent);
 
       print('Config Path: ${configFile.path}');
+      print('Starting Clash Core...');
 
-      await platform.invokeMethod('start', {'config_path': configFile.path});
-      _isRunning = true;
-      print(
-          'Core Started via MethodChannel with Config File: ${configFile.path}');
+      try {
+        await platform.invokeMethod('start', {'config_path': configFile.path});
+        _isRunning = true;
+        print(
+            'Core Started via MethodChannel with Config File: ${configFile.path}');
 
-      // Start Log Tailing
-      _startLogTailing(File(logPath));
+        // Start Log Tailing
+        _startLogTailing(File(logPath));
+
+        // Wait for core to become ready (Polling)
+        int retry = 0;
+        while (retry < 20) {
+          if (await testClashApi()) break;
+          await Future.delayed(const Duration(milliseconds: 500));
+          retry++;
+        }
+
+        // Set default nodes for all select groups via API
+        _setDefaultNodesViaAPI();
+      } on PlatformException catch (e) {
+        print('Platform Exception: ${e.code} - ${e.message}');
+        if (e.code == 'PERMISSION_DENIED') {
+          _isRunning = false;
+          rethrow;
+        } else if (e.code == 'PERMISSION_REQUIRED') {
+          print('VPN Permission requested, waiting for user...');
+          // The service will start after permission is granted
+          // Check status after a delay
+          await Future.delayed(const Duration(seconds: 3));
+          _isRunning = await checkStatus();
+          if (_isRunning) {
+            await _setDefaultNodesViaAPI();
+          }
+        } else {
+          _isRunning = true;
+        }
+      }
     } catch (e) {
       print('Failed to start core: $e');
-      _isRunning = true; // Still mock running state for UI
+      _isRunning = false;
+      rethrow;
     }
   }
 
@@ -184,6 +232,17 @@ dns:
   Future<void> updateConfig(String yamlContent) async {
     final result = await ConfigParserService.parseConfig(yamlContent);
     _cachedGroups = result.groups;
+
+    // Ensure each select group has a default node selected
+    for (var group in _cachedGroups) {
+      if (group.type == 'select' && group.nodes.isNotEmpty) {
+        if (group.now == null || group.now!.isEmpty) {
+          // Set first node as default
+          group.now = group.nodes.first.name;
+          print('Auto-selected default node for ${group.name}: ${group.now}');
+        }
+      }
+    }
 
     // Save Order to Prefs
     final prefs = await SharedPreferences.getInstance();
@@ -279,6 +338,76 @@ dns:
       }
     } catch (e) {
       print('Change Mode Error: $e');
+    }
+  }
+
+  // Get Clash logs for diagnostics
+  Future<String> getClashLogs() async {
+    try {
+      final supportDir = await getApplicationSupportDirectory();
+      final logFile = File('${supportDir.path}/clash/clash_core.log');
+
+      if (await logFile.exists()) {
+        final lines = await logFile.readAsLines();
+        // Get last 100 lines
+        final lastLines =
+            lines.length > 100 ? lines.sublist(lines.length - 100) : lines;
+        return lastLines.join('\n');
+      }
+      return 'Log file not found';
+    } catch (e) {
+      return 'Error reading logs: $e';
+    }
+  }
+
+  // Test Clash API connection
+  Future<bool> testClashApi() async {
+    try {
+      final url = Uri.parse('http://127.0.0.1:9090/version');
+      final response = await http.get(url).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        print('Clash API Connected: Version ${data['version']}');
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print('Clash API Test Failed: $e');
+      return false;
+    }
+  }
+
+  // Get connection stats
+  Future<Map<String, dynamic>> getTrafficStats() async {
+    try {
+      final url = Uri.parse('http://127.0.0.1:9090/traffic');
+      final response = await http.get(url).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      }
+      return {};
+    } catch (e) {
+      print('Get Traffic Stats Failed: $e');
+      return {};
+    }
+  }
+
+  // Set default nodes via API after core starts
+  Future<void> _setDefaultNodesViaAPI() async {
+    print('Setting default nodes via API...');
+    for (var group in _cachedGroups) {
+      if (group.type == 'select' &&
+          group.now != null &&
+          group.now!.isNotEmpty) {
+        try {
+          await selectProxy(group.name, group.now!);
+          print('Set default node for ${group.name}: ${group.now}');
+        } catch (e) {
+          print('Failed to set default node for ${group.name}: $e');
+        }
+        // Add delay between API calls
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
     }
   }
 }

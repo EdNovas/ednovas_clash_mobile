@@ -23,8 +23,8 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     sourceSets {
@@ -33,7 +33,7 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
     }
 
     defaultConfig {
@@ -63,6 +63,7 @@ dependencies {
     // Hardcoded Kotlin version to avoid resolution errors
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.0")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
+    // implementation(files("libs/mobile.aar")) // Removed for .so usage
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
 }

@@ -61,7 +61,7 @@ class _LoginPageState extends State<LoginPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('Account or password error'),
-            backgroundColor: Colors.red),
+            backgroundColor: Color.fromARGB(255, 231, 98, 89)),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);

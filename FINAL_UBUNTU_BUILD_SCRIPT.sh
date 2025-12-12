@@ -219,7 +219,7 @@ build_arch() {
     if [ -n "$GO_ARM" ]; then export GOARM=$GO_ARM; fi
 
     # Go Build (启用 with_gvisor)
-    go build -v -ldflags="-s -w" -tags=with_gvisor -buildmode=c-shared -o "$TARGET_DIR/libclash.so"
+    go build -v -ldflags="-s -w" -tags=with_gvisor,cmfa -buildmode=c-shared -o "$TARGET_DIR/libclash.so"
 
     unset GOARM
     echo -e "${GREEN}>>> [完成] $ABI_NAME -> $TARGET_DIR/libclash.so${NC}"
