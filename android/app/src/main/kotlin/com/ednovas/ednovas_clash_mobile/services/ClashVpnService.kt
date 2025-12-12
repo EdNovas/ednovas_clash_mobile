@@ -23,22 +23,41 @@ class ClashVpnService : VpnService() {
         private const val CHANNEL_ID = "ClashVpnServiceChannel"
         
         @Volatile var isRunning = false
+        
+        // JNA Interface definition
+        interface ClashLibrary : com.sun.jna.Library {
+            fun Start(homeDir: String, configContent: String, fd: Int): String?
+            fun startTUN(callback: com.sun.jna.Pointer?, fd: Int, stack: String, address: String, dns: String): Boolean
+            fun Stop(): String?
+            fun SetMode(mode: String): String?
+            fun GetMode(): String?
+        }
+        
+        // Shared library instance
+        val clashLib: ClashLibrary by lazy {
+            com.sun.jna.Native.load("clash", ClashLibrary::class.java)
+        }
+        
+        // Helper methods for external access
+        fun setMode(mode: String): String? {
+            return try {
+                clashLib.SetMode(mode)
+            } catch (e: Exception) {
+                "Error: ${e.message}"
+            }
+        }
+        
+        fun getMode(): String? {
+            return try {
+                clashLib.GetMode()
+            } catch (e: Exception) {
+                null
+            }
+        }
     }
 
     private var tunFd: ParcelFileDescriptor? = null
     private val TAG = "ClashVpnService"
-
-    // JNA Interface definition
-    interface ClashLibrary : com.sun.jna.Library {
-        fun Start(homeDir: String, configContent: String, fd: Int): String?
-        fun startTUN(callback: com.sun.jna.Pointer?, fd: Int, stack: String, address: String, dns: String): Boolean
-        fun Stop(): String?
-    }
-    
-    // Lazy load the library
-    private val clashLib by lazy {
-        com.sun.jna.Native.load("clash", ClashLibrary::class.java)
-    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
@@ -109,8 +128,8 @@ class ClashVpnService : VpnService() {
                 val fd = tunFd!!.detachFd()
                 tunFd = null  // Clear reference since we've detached it
                 
-                // Pass explicit parameters to startTUN
-                val success = clashLib.startTUN(null, fd, "lwip", "172.19.0.1/30", "1.1.1.1,8.8.8.8")
+                // Pass explicit parameters to startTUN (gvisor is recommended for Android)
+                val success = clashLib.startTUN(null, fd, "gvisor", "172.19.0.1/30", "1.1.1.1,8.8.8.8")
                 
                 if (!success) {
                     Log.e(TAG, "Native startTUN Failed")

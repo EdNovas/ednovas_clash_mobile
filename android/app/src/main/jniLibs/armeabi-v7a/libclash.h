@@ -96,6 +96,8 @@ extern "C" {
 extern char* Start(char* homeDir, char* configContent, int fd);
 extern GoUint8 startTUN(void* callback, int fd, char* stackChar, char* addressChar, char* dnsChar);
 extern char* Stop(void);
+extern char* SetMode(char* modeChar);
+extern char* GetMode(void);
 
 #ifdef __cplusplus
 }

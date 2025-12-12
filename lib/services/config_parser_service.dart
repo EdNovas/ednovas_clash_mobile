@@ -62,11 +62,30 @@ class ConfigParserService {
               }
             }).toList();
 
+            // Find a real proxy node as default (skip info nodes for GLOBAL group)
+            String defaultNode = proxies.isNotEmpty ? proxies.first : '';
+            if (name == 'GLOBAL' || name.toUpperCase() == 'GLOBAL') {
+              // For GLOBAL, skip info nodes and find a real proxy
+              for (var nodeName in proxies) {
+                // Skip info-like nodes
+                if (!nodeName.contains('剩余流量') &&
+                    !nodeName.contains('套餐到期') &&
+                    !nodeName.contains('距离下次重置') &&
+                    !nodeName.contains('https://') &&
+                    !nodeName.contains('Traffic') &&
+                    !nodeName.contains('Expire') &&
+                    nodeMap.containsKey(nodeName)) {
+                  defaultNode = nodeName;
+                  break;
+                }
+              }
+            }
+
             groups.add(ProxyGroup(
               name: name,
               type: type,
               nodes: resolvedNodes,
-              now: proxies.isNotEmpty ? proxies.first : '',
+              now: defaultNode,
             ));
           }
         }

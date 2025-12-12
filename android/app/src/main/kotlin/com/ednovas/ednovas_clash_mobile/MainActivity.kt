@@ -44,6 +44,23 @@ class MainActivity : FlutterActivity() {
                 "status" -> {
                     result.success(ClashVpnService.isRunning)
                 }
+                "setMode" -> {
+                    val mode = call.argument<String>("mode")
+                    if (mode == null) {
+                        result.error("INVALID_ARGUMENT", "Mode is null", null)
+                        return@setMethodCallHandler
+                    }
+                    val error = ClashVpnService.setMode(mode)
+                    if (error.isNullOrEmpty()) {
+                        result.success(true)
+                    } else {
+                        result.error("SET_MODE_FAILED", error, null)
+                    }
+                }
+                "getMode" -> {
+                    val mode = ClashVpnService.getMode()
+                    result.success(mode ?: "unknown")
+                }
                 else -> {
                     result.notImplemented()
                 }

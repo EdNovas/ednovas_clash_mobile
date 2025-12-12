@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/proxy_model.dart';
 import 'config_parser_service.dart';
 import 'resource_service.dart';
+import 'latency_service.dart';
 
 class ClashService {
   bool _isRunning = false;
@@ -162,6 +163,9 @@ dns:
 
         // Set default nodes for all select groups via API
         _setDefaultNodesViaAPI();
+
+        // Auto-test latency for all nodes after startup
+        _autoTestLatency();
       } on PlatformException catch (e) {
         print('Platform Exception: ${e.code} - ${e.message}');
         if (e.code == 'PERMISSION_DENIED') {
@@ -342,7 +346,7 @@ dns:
     }
   }
 
-  // Change proxy mode by saving and restarting (REST API PATCH not supported by custom Go core)
+  // Change proxy mode using native Go core SetMode (instant, no restart needed)
   Future<void> changeMode(String mode) async {
     final normalizedMode = mode.toLowerCase();
     if (normalizedMode != 'rule' &&
@@ -354,20 +358,39 @@ dns:
 
     print('Changing mode to: $normalizedMode');
 
-    // Save the mode
+    // Save the mode for future starts
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('proxy_mode', normalizedMode);
     _currentMode = normalizedMode;
 
-    // If VPN is running, restart it to apply new mode
+    // If VPN is running, use native SetMode for instant switch
     if (_isRunning) {
-      print('Restarting VPN to apply new mode...');
-      await stop();
-      await Future.delayed(const Duration(milliseconds: 500));
-      await start();
-      print('VPN restarted with mode: $normalizedMode');
+      try {
+        await platform.invokeMethod('setMode', {'mode': normalizedMode});
+        print('Mode changed to $normalizedMode via native core');
+      } on PlatformException catch (e) {
+        print('Native SetMode failed: ${e.message}');
+        // Fallback: restart VPN
+        print('Falling back to VPN restart...');
+        await stop();
+        await Future.delayed(const Duration(milliseconds: 500));
+        await start();
+        print('VPN restarted with mode: $normalizedMode');
+      }
     } else {
       print('Mode saved. Will apply on next start.');
+    }
+  }
+
+  // Get current mode from native core
+  Future<String> getMode() async {
+    if (!_isRunning) return _currentMode;
+    try {
+      final mode = await platform.invokeMethod('getMode');
+      return mode?.toString().toLowerCase() ?? _currentMode;
+    } catch (e) {
+      print('GetMode failed: $e');
+      return _currentMode;
     }
   }
 
@@ -439,5 +462,30 @@ dns:
         await Future.delayed(const Duration(milliseconds: 10));
       }
     }
+  }
+
+  // Auto-test latency for all proxy nodes after startup
+  void _autoTestLatency() {
+    // Collect all unique node names from all groups
+    final Set<String> allNodeNames = {};
+    for (var group in _cachedGroups) {
+      for (var node in group.nodes) {
+        // Skip non-proxy nodes (info nodes, groups, etc.)
+        if (node.type != 'group/other' &&
+            !node.name.contains('剩余流量') &&
+            !node.name.contains('套餐到期') &&
+            !node.name.contains('距离下次重置') &&
+            !node.name.contains('https://')) {
+          allNodeNames.add(node.name);
+        }
+      }
+    }
+
+    print('Registering ${allNodeNames.length} nodes for auto latency test...');
+
+    // Register and test
+    final latencyService = LatencyService();
+    latencyService.registerAllNodes(allNodeNames.toList());
+    latencyService.testAllNodes();
   }
 }

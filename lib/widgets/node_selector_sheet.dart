@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:gap/gap.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 import '../models/proxy_model.dart';
+import '../services/latency_service.dart';
 
 class NodeSelectorSheet extends StatefulWidget {
   final List<ProxyGroup> groups;
@@ -23,7 +20,33 @@ class NodeSelectorSheet extends StatefulWidget {
 
 class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
   int _selectedGroupIndex = 0;
-  bool _isGridView = true; // Toggle between Grid and List
+  bool _isGridView = true;
+  final LatencyService _latencyService = LatencyService();
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen to latency updates
+    _latencyService.addListener(_onLatencyUpdate);
+  }
+
+  @override
+  void dispose() {
+    _latencyService.removeListener(_onLatencyUpdate);
+    super.dispose();
+  }
+
+  void _onLatencyUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  /// Check if group type allows manual selection
+  bool _isManualSelectAllowed(ProxyGroup group) {
+    final type = group.type.toLowerCase();
+    // Only 'select' type allows manual node selection
+    // url-test, fallback, load-balance auto-select nodes
+    return type == 'select';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,15 +59,15 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
                   style: TextStyle(color: Colors.white))));
     }
 
-    // Safety check for index
     if (_selectedGroupIndex >= widget.groups.length) {
       _selectedGroupIndex = 0;
     }
 
     final selectedGroup = widget.groups[_selectedGroupIndex];
+    final canManualSelect = _isManualSelectAllowed(selectedGroup);
 
     return Container(
-      height: MediaQuery.of(context).size.height * 0.75, // Not full screen
+      height: MediaQuery.of(context).size.height * 0.75,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E1E),
@@ -60,23 +83,65 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Proxy Nodes',
-                  style: GoogleFonts.outfit(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Proxy Nodes',
+                      style: GoogleFonts.outfit(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white)),
+                  if (!canManualSelect)
+                    Text(
+                      '${selectedGroup.type.toUpperCase()} - 自动选择',
+                      style: TextStyle(
+                        color: Colors.orange[300],
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
               Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.flash_on, color: Colors.amber),
-                    tooltip: 'Test Latency',
-                    onPressed: _testGroupLatency,
-                  ),
+                  // Latency test button with loading indicator and cooldown
+                  _latencyService.isTesting
+                      ? const SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.amber,
+                              ),
+                            ),
+                          ),
+                        )
+                      : _latencyService.canTest
+                          ? IconButton(
+                              icon:
+                                  const Icon(Icons.speed, color: Colors.amber),
+                              tooltip: 'Test Latency',
+                              onPressed: _testGroupLatency,
+                            )
+                          : Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              child: Text(
+                                '${_latencyService.cooldownRemaining}s',
+                                style: TextStyle(
+                                  color: Colors.grey[500],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
                   TextButton.icon(
                     onPressed: () => setState(() => _isGridView = !_isGridView),
                     icon: Icon(_isGridView ? Icons.list : Icons.grid_view,
                         color: Colors.blueAccent),
-                    label: Text(_isGridView ? 'List View' : 'Grid View'),
+                    label: Text(_isGridView ? 'List' : 'Grid'),
                   ),
                 ],
               ),
@@ -84,16 +149,29 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
           ),
           const Gap(16),
 
-          // Group Selector (Horizontal Scroll)
+          // Group Selector
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               children: widget.groups.asMap().entries.map((entry) {
                 final isSelected = entry.key == _selectedGroupIndex;
+                final group = entry.value;
+                final isAutoType = !_isManualSelectAllowed(group);
+
                 return Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: ChoiceChip(
-                    label: Text(entry.value.name),
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isAutoType)
+                          Icon(Icons.auto_awesome,
+                              size: 14,
+                              color: isSelected ? Colors.white : Colors.amber),
+                        if (isAutoType) const SizedBox(width: 4),
+                        Text(group.name),
+                      ],
+                    ),
                     selected: isSelected,
                     onSelected: (_) =>
                         setState(() => _selectedGroupIndex = entry.key),
@@ -120,14 +198,15 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
                       mainAxisSpacing: 12,
                     ),
                     itemCount: selectedGroup.nodes.length,
-                    itemBuilder: (context, index) =>
-                        _buildNodeCard(selectedGroup.nodes[index]),
+                    itemBuilder: (context, index) => _buildNodeCard(
+                        selectedGroup.nodes[index], canManualSelect),
                   )
                 : ListView.builder(
                     itemCount: selectedGroup.nodes.length,
                     itemBuilder: (context, index) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
-                      child: _buildNodeCard(selectedGroup.nodes[index]),
+                      child: _buildNodeCard(
+                          selectedGroup.nodes[index], canManualSelect),
                     ),
                   ),
           ),
@@ -136,186 +215,107 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
     );
   }
 
-  Widget _buildNodeCard(ProxyNode node) {
+  Widget _buildNodeCard(ProxyNode node, bool canManualSelect) {
     final selectedGroup = widget.groups[_selectedGroupIndex];
     final isSelected = selectedGroup.now == node.name;
+    final cachedDelay = _latencyService.getLatency(node.name);
+    final displayDelay = cachedDelay ?? node.delay;
 
     return InkWell(
-      onTap: () {
-        if (isSelected) return; // Do nothing if already selected
-
-        // Optimistic Local Update
-        setState(() {
-          selectedGroup.now = node.name;
-        });
-        // Notify Parent
-        widget.onNodeSelected(selectedGroup.name, node.name);
-      },
+      onTap: canManualSelect
+          ? () {
+              if (isSelected) return;
+              setState(() {
+                selectedGroup.now = node.name;
+              });
+              widget.onNodeSelected(selectedGroup.name, node.name);
+            }
+          : null, // Disable tap for auto-select groups
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isSelected
-              ? Colors.blueAccent.withOpacity(0.2)
-              : const Color(0xFF2C2C2C),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: isSelected ? Colors.blueAccent : Colors.white10),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    node.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: isSelected ? Colors.blueAccent : Colors.white,
-                        fontWeight: FontWeight.w500),
-                  ),
-                  Text(
-                    node.type,
-                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                  ),
-                ],
+      child: Opacity(
+        opacity: canManualSelect ? 1.0 : 0.8,
+        child: Container(
+          decoration: BoxDecoration(
+            color: isSelected
+                ? Colors.blueAccent.withOpacity(0.2)
+                : const Color(0xFF2C2C2C),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: isSelected ? Colors.blueAccent : Colors.white10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      node.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: isSelected ? Colors.blueAccent : Colors.white,
+                          fontWeight: FontWeight.w500),
+                    ),
+                    Row(
+                      children: [
+                        Text(
+                          node.type,
+                          style:
+                              TextStyle(color: Colors.grey[500], fontSize: 12),
+                        ),
+                        if (!canManualSelect && isSelected) ...[
+                          const SizedBox(width: 4),
+                          Icon(Icons.check_circle,
+                              size: 12, color: Colors.green[400]),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (node.delay != null)
-              Row(
-                children: [
-                  Text(
-                    '${node.delay}ms',
+              if (displayDelay != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: displayDelay < 0
+                        ? Colors.red.withOpacity(0.2)
+                        : displayDelay < 150
+                            ? Colors.green.withOpacity(0.2)
+                            : Colors.orange.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    displayDelay < 0 ? 'fail' : '${displayDelay}ms',
                     style: TextStyle(
-                      color: (node.delay ?? 0) < 0
-                          ? Colors.red // Error
-                          : (node.delay ?? 0) < 150
+                      color: displayDelay < 0
+                          ? Colors.red
+                          : displayDelay < 150
                               ? Colors.green
                               : Colors.orange,
-                      fontSize: 12,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.bolt, size: 14, color: Colors.blue),
-                ],
-              ),
-          ],
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  bool _isTesting = false;
-
-  void _testGroupLatency() async {
-    if (_isTesting) return;
-    print('Starting Latency Test...');
-    _isTesting = true;
-
-    // Check if API is responsive first
-    try {
-      await http
-          .get(Uri.parse('http://127.0.0.1:9090'))
-          .timeout(const Duration(seconds: 2));
-    } catch (e) {
-      print('API Root Check Failed: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Clash API Unreachable: $e')),
-        );
-      }
-      _isTesting = false;
-      return;
-    }
-
-    // AGGRESSIVE LOG DUMP
-    try {
-      final supportDir = await getApplicationSupportDirectory();
-      final clashDir = Directory('${supportDir.path}/clash');
-      print('Searching for logs in: ${clashDir.path}');
-
-      if (await clashDir.exists()) {
-        final files = clashDir.listSync();
-        print('Files found (${files.length}):');
-        for (var f in files) {
-          print(
-              ' - ${f.path.split('/').last} (${(await f.stat()).size} bytes)');
-        }
-
-        final logFile = File('${clashDir.path}/clash_core.log');
-        if (await logFile.exists()) {
-          print('>>> CLASH CORE LOG BLOCK START <<<');
-          final content = await logFile.readAsString();
-          // Print in chunks to avoid truncation
-          final lines = content.split('\n');
-          // Print last 100 lines
-          final startIdx = lines.length > 100 ? lines.length - 100 : 0;
-          for (var i = startIdx; i < lines.length; i++) {
-            print(lines[i]);
-          }
-          print('>>> CLASH CORE LOG BLOCK END <<<');
-        } else {
-          print('Log file NOT FOUND in clash dir.');
-        }
-      } else {
-        print('Clash dir does not exist (Flutter view).');
-      }
-    } catch (logErr) {
-      print('Log dump failed: $logErr');
-    }
-
+  void _testGroupLatency() {
     final group = widget.groups[_selectedGroupIndex];
-    // Test in batches of 5 to avoid resource exhaustion
-    for (var i = 0; i < group.nodes.length; i += 5) {
-      if (!mounted) break;
-      final end = (i + 5 < group.nodes.length) ? i + 5 : group.nodes.length;
-      final batch = group.nodes.sublist(i, end);
+    final nodeNames = group.nodes.map((n) => n.name).toList();
 
-      await Future.wait(batch.map((node) async {
-        if (node.name.isEmpty) return;
+    // Start background test - will continue even if sheet is closed
+    _latencyService.testNodesLatency(nodeNames);
 
-        try {
-          // Use Uri constructor with pathSegments to handle special chars (spaces, slashes) in names automatically
-          final url = Uri(
-            scheme: 'http',
-            host: '127.0.0.1',
-            port: 9090,
-            pathSegments: ['proxies', node.name, 'delay'],
-            queryParameters: {
-              'timeout': '5000',
-              'url': 'http://www.gstatic.com/generate_204'
-            },
-          );
-
-          print('Testing: ${node.name} -> $url');
-
-          final response =
-              await http.get(url).timeout(const Duration(seconds: 3));
-
-          if (response.statusCode == 200) {
-            final data = json.decode(response.body);
-            final delay = data['delay'] as int?;
-            print('Success [${node.name}]: $delay ms');
-            if (mounted && delay != null) {
-              setState(() => node.delay = delay);
-            }
-          } else {
-            print(
-                'Latency Error [${node.name}]: Status ${response.statusCode}, Body: ${response.body}');
-            if (mounted) setState(() => node.delay = -1);
-          }
-        } catch (e) {
-          print('Latency Exception [${node.name}]: $e');
-          if (mounted) setState(() => node.delay = -1);
-        }
-      }));
-      // Small delay between batches
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-
-    _isTesting = false;
+    // Force UI update to show loading indicator
+    setState(() {});
   }
 }

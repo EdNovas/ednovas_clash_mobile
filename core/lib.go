@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -26,6 +27,7 @@ import (
 	LC "github.com/metacubex/mihomo/listener/config"
 	"github.com/metacubex/mihomo/listener/sing_tun"
 	"github.com/metacubex/mihomo/log"
+	"github.com/metacubex/mihomo/tunnel"
 )
 
 var (
@@ -167,6 +169,36 @@ func Stop() *C.char {
 	coreRunning = false
 	log.Infoln("Clash Core stopped")
 	return C.CString("")
+}
+
+//export SetMode
+func SetMode(modeChar *C.char) *C.char {
+	mode := strings.ToLower(C.GoString(modeChar))
+
+	var tunMode tunnel.TunnelMode
+	switch mode {
+	case "global":
+		tunMode = tunnel.Global
+	case "rule":
+		tunMode = tunnel.Rule
+	case "direct":
+		tunMode = tunnel.Direct
+	default:
+		errMsg := fmt.Sprintf("Invalid mode: %s. Must be rule, global, or direct.", mode)
+		log.Errorln(errMsg)
+		return C.CString(errMsg)
+	}
+
+	tunnel.SetMode(tunMode)
+	log.Infoln("Mode changed to: %s", mode)
+	androidLog(fmt.Sprintf("Mode changed to: %s", mode))
+	return C.CString("")
+}
+
+//export GetMode
+func GetMode() *C.char {
+	mode := tunnel.Mode()
+	return C.CString(mode.String())
 }
 
 func main() {}
