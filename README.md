@@ -1,6 +1,8 @@
-# EdNovas Clash Mobile
+# EdNovas云 (EdNovas Clash Mobile)
 
 <div align="center">
+
+<img src="assets/icon.png" width="120" alt="EdNovas云 Logo"/>
 
 ![Version](https://img.shields.io/badge/version-v0.0.1-blue)
 ![Platform](https://img.shields.io/badge/platform-Android-green)
@@ -17,7 +19,7 @@
 
 ## 📱 简介
 
-EdNovas Clash Mobile 是一款专为 [EdNovas](https://ednovas.com) 订阅用户设计的 Android VPN 客户端。基于 [Mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta) 核心，提供高效、稳定的代理服务。
+EdNovas云 是一款专为 [EdNovas](https://ednovas.com) 订阅用户设计的 Android VPN 客户端。基于 [Mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta) 核心，参考 [FlClash](https://github.com/chen08209/FlClash) 架构设计，提供高效、稳定的代理服务。
 
 ## ✨ 功能
 
@@ -127,8 +129,9 @@ ednovas_clash_mobile/
 
 ## 🙏 致谢
 
-- [Mihomo](https://github.com/MetaCubeX/mihomo) - Clash Meta 核心
-- [sing-tun](https://github.com/SagerNet/sing-tun) - TUN 实现
+- [FlClash](https://github.com/chen08209/FlClash) - 项目架构设计参考，优秀的跨平台 Clash 客户端
+- [Mihomo](https://github.com/MetaCubeX/mihomo) - Clash Meta 核心引擎
+- [sing-tun](https://github.com/SagerNet/sing-tun) - TUN 接口实现
 - [Flutter](https://flutter.dev/) - 跨平台 UI 框架
 
 ---

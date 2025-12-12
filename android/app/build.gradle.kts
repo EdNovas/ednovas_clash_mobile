@@ -38,14 +38,12 @@ android {
 
     defaultConfig {
         applicationId = "com.ednovas.ednovas_clash_mobile"
-        minSdk = flutter.minSdkVersion // Safe manual value or flutter.minSdkVersion if resolved
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutterVersionCode.toInt()
         versionName = flutterVersionName
-        
-        ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))
-        }
+        // Note: ndk.abiFilters removed to avoid conflict with Flutter's --split-per-abi
+        // The JNI libraries are placed in jniLibs/<abi>/ directories
     }
 
     buildTypes {
