@@ -12,6 +12,10 @@ class ClashService {
   bool _isRunning = false;
   bool get isRunning => _isRunning;
 
+  // Current proxy mode (rule, global, direct)
+  String _currentMode = 'rule';
+  String get currentMode => _currentMode;
+
   // In-memory cache of groups (Simulating Core State)
   List<ProxyGroup> _cachedGroups = [];
 
@@ -25,17 +29,20 @@ class ClashService {
 
       if (configContent.isEmpty) {
         throw Exception(
-            'No configuration found. Please update subscription first.');
+          'No configuration found. Please update subscription first.',
+        );
       }
 
       // Helper to remove top-level keys safely (handling indentation and CRLF)
       String removeKey(String content, String key) {
         // Matches "key: ..." followed by any number of indented lines or empty lines
         return content.replaceAll(
-            RegExp(
-                r'^' + key + r':[^\n\r]*(\r?\n|\r)((?:[ \t]+.*|)(\r?\n|\r))*',
-                multiLine: true),
-            '');
+          RegExp(
+            r'^' + key + r':[^\n\r]*(\r?\n|\r)((?:[ \t]+.*|)(\r?\n|\r))*',
+            multiLine: true,
+          ),
+          '',
+        );
       }
 
       // 1. Strip conflicting keys to clean the slate
@@ -55,6 +62,9 @@ class ClashService {
       final supportDir = await getApplicationSupportDirectory();
       final logPath = '${supportDir.path}/clash/clash_core.log';
 
+      // Load saved mode
+      _currentMode = prefs.getString('proxy_mode') ?? 'rule';
+
       // 3. Construct the Header (Infrastructure)
       final String infrastructureConfig = '''
 external-controller: 127.0.0.1:9090
@@ -63,7 +73,7 @@ log-level: info
 log-file: '$logPath'
 ipv6: false
 allow-lan: false
-mode: rule
+mode: $_currentMode
 unified-delay: true
 global-client-fingerprint: chrome
 
@@ -111,10 +121,12 @@ dns:
 
       // DEBUG: Print final config
       print(
-          'GENERATED CONFIG HEAD: \n${configContent.substring(0, configContent.length > 500 ? 500 : configContent.length)}');
+        'GENERATED CONFIG HEAD: \n${configContent.substring(0, configContent.length > 500 ? 500 : configContent.length)}',
+      );
       try {
         print(
-            'GENERATED CONFIG TAIL: \n${configContent.substring(configContent.length > 500 ? configContent.length - 500 : 0)}');
+          'GENERATED CONFIG TAIL: \n${configContent.substring(configContent.length > 500 ? configContent.length - 500 : 0)}',
+        );
       } catch (e) {
         print('Error printing tail: $e');
       }
@@ -134,7 +146,8 @@ dns:
         await platform.invokeMethod('start', {'config_path': configFile.path});
         _isRunning = true;
         print(
-            'Core Started via MethodChannel with Config File: ${configFile.path}');
+          'Core Started via MethodChannel with Config File: ${configFile.path}',
+        );
 
         // Start Log Tailing
         _startLogTailing(File(logPath));
@@ -261,29 +274,33 @@ dns:
     return [
       // Keep mock data as fallback until first update
       ProxyGroup(
-          name: 'Auto Select',
-          type: 'url-test',
-          nodes: _generateNodes('Auto', 5)),
+        name: 'Auto Select',
+        type: 'url-test',
+        nodes: _generateNodes('Auto', 5),
+      ),
       ProxyGroup(
-          name: 'Global',
-          type: 'select',
-          nodes: _generateNodes('Global', 10),
-          now: 'Global Node 1'),
+        name: 'Global',
+        type: 'select',
+        nodes: _generateNodes('Global', 10),
+        now: 'Global Node 1',
+      ),
       ProxyGroup(
-          name: 'Streaming',
-          type: 'select',
-          nodes: _generateNodes('Stream', 8)),
+        name: 'Streaming',
+        type: 'select',
+        nodes: _generateNodes('Stream', 8),
+      ),
     ];
   }
 
   List<ProxyNode> _generateNodes(String prefix, int count) {
     return List.generate(
-        count,
-        (index) => ProxyNode(
-              name: '$prefix Node ${index + 1}',
-              type: 'Shadowsocks',
-              delay: index * 50 + 20,
-            ));
+      count,
+      (index) => ProxyNode(
+        name: '$prefix Node ${index + 1}',
+        type: 'Shadowsocks',
+        delay: index * 50 + 20,
+      ),
+    );
   }
 
   // Update local memory cache only
@@ -293,10 +310,11 @@ dns:
 
     final oldGroup = _cachedGroups[index];
     final newGroup = ProxyGroup(
-        name: oldGroup.name,
-        type: oldGroup.type,
-        nodes: oldGroup.nodes,
-        now: nodeName);
+      name: oldGroup.name,
+      type: oldGroup.type,
+      nodes: oldGroup.nodes,
+      now: nodeName,
+    );
     _cachedGroups[index] = newGroup;
   }
 
@@ -308,6 +326,7 @@ dns:
 
       final response = await http.put(
         url,
+        headers: {'Content-Type': 'application/json'},
         body: json.encode({'name': nodeName}),
       );
 
@@ -323,21 +342,32 @@ dns:
     }
   }
 
-  // Call Clash API to change mode
+  // Change proxy mode by saving and restarting (REST API PATCH not supported by custom Go core)
   Future<void> changeMode(String mode) async {
-    try {
-      final url = Uri.parse('http://127.0.0.1:9090/configs');
-      final response = await http.patch(
-        url,
-        body: json.encode({'mode': mode}),
-      );
-      if (response.statusCode != 204) {
-        print('Change Mode Failed: ${response.statusCode} ${response.body}');
-      } else {
-        print('Mode changed to $mode');
-      }
-    } catch (e) {
-      print('Change Mode Error: $e');
+    final normalizedMode = mode.toLowerCase();
+    if (normalizedMode != 'rule' &&
+        normalizedMode != 'global' &&
+        normalizedMode != 'direct') {
+      print('Invalid mode: $mode. Must be rule, global, or direct.');
+      return;
+    }
+
+    print('Changing mode to: $normalizedMode');
+
+    // Save the mode
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('proxy_mode', normalizedMode);
+    _currentMode = normalizedMode;
+
+    // If VPN is running, restart it to apply new mode
+    if (_isRunning) {
+      print('Restarting VPN to apply new mode...');
+      await stop();
+      await Future.delayed(const Duration(milliseconds: 500));
+      await start();
+      print('VPN restarted with mode: $normalizedMode');
+    } else {
+      print('Mode saved. Will apply on next start.');
     }
   }
 

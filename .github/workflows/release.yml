@@ -179,49 +179,36 @@ jobs:
     
     - name: Generate Changelog
       id: changelog
-      uses: mikepenz/release-changelog-builder-action@v4
-      with:
-        configuration: |
-          {
-            "categories": [
-              {
-                "title": "## 🚀 Features",
-                "labels": ["feature", "enhancement"]
-              },
-              {
-                "title": "## 🐛 Bug Fixes",
-                "labels": ["bug", "fix"]
-              },
-              {
-                "title": "## 📝 Other Changes",
-                "labels": []
-              }
-            ]
-          }
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+        git log --pretty=format:"- %s (%an)" $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")..HEAD 2>/dev/null || echo "- 初始版本"
+        echo "" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
     
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        name: Release ${{ github.ref_name }}
+        name: EdNovas云 ${{ github.ref_name }}
         body: |
-          ## EdNovas Clash Mobile ${{ github.ref_name }}
+          ## EdNovas云 ${{ github.ref_name }}
           
-          ${{ steps.changelog.outputs.changelog }}
+          ### 📋 更新日志
           
-          ### 📦 Downloads
+          ${{ steps.changelog.outputs.CHANGELOG }}
           
-          | Architecture | Description |
-          |-------------|-------------|
-          | `arm64-v8a` | 64-bit ARM devices (most modern phones) |
-          | `armeabi-v7a` | 32-bit ARM devices (older phones) |
-          | `x86_64` | 64-bit x86 devices (emulators, some tablets) |
-          | `universal` | All architectures (larger file size) |
+          ### 📦 下载说明
           
-          ### ⚠️ Notes
-          - This is a VPN client for EdNovas subscription service
-          - Requires valid EdNovas account to use
+          | 文件 | 架构 | 适用设备 |
+          |------|------|----------|
+          | `arm64-v8a` | ARM64 | 大多数现代手机（推荐） |
+          | `armeabi-v7a` | ARM32 | 较旧的 32 位手机 |
+          | `x86_64` | x86_64 | 模拟器、部分平板 |
+          | `universal` | 通用 | 包含所有架构（文件较大） |
+          
+          ### ⚠️ 注意事项
+          - 本应用为 EdNovas 订阅服务专属 VPN 客户端
+          - 需要有效的 EdNovas 账号才能使用
+          - 首次使用请先在设置中登录账号
         files: release/*.apk
         draft: false
         prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

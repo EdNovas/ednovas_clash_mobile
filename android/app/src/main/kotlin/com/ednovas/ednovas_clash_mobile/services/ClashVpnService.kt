@@ -104,8 +104,12 @@ class ClashVpnService : VpnService() {
                 }
 
                 Log.d(TAG, "Calling Native startTUN...")
-                val fd = tunFd!!.fd
-                // Pass explicit parameters to startTUN to verify JNI
+                // Use detachFd() to transfer ownership of the fd to Go code
+                // After detachFd(), ParcelFileDescriptor will no longer try to close the fd
+                val fd = tunFd!!.detachFd()
+                tunFd = null  // Clear reference since we've detached it
+                
+                // Pass explicit parameters to startTUN
                 val success = clashLib.startTUN(null, fd, "lwip", "172.19.0.1/30", "1.1.1.1,8.8.8.8")
                 
                 if (!success) {
@@ -162,17 +166,18 @@ class ClashVpnService : VpnService() {
 
     private fun stopVpn() {
         isRunning = false
+        
+        // First, stop the Go core - this will close the TUN listener and the fd
         try {
             clashLib.Stop()
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping Mobile", e)
+            Log.e(TAG, "Error stopping Clash: ${e.message}")
         }
         
-        try {
-            tunFd?.close()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error closing FD", e)
-        }
+        // Don't close tunFd here! 
+        // The fd ownership was transferred to Go when we passed it to startTUN.
+        // Go's tunListener.Close() already closed the fd.
+        // Calling tunFd.close() again would cause fdsan error.
         tunFd = null
         
         stopForeground(true)
