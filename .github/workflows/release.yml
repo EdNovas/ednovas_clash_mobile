@@ -4,42 +4,224 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.0.1)'
+        required: false
+        default: 'dev'
+
+env:
+  GO_VERSION: '1.22'
+  FLUTTER_VERSION: '3.24.x'
+  NDK_VERSION: 'r26b'
 
 jobs:
-  build:
+  build-core:
+    name: Build Clash Core Libraries
     runs-on: ubuntu-latest
-
+    
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache-dependency-path: core/go.sum
+    
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: ${{ env.NDK_VERSION }}
+        add-to-path: true
+    
+    - name: Build Core Libraries
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      run: |
+        cd core
+        
+        # Define build targets
+        declare -A TARGETS=(
+          ["arm64-v8a"]="arm64:aarch64-linux-android21-clang"
+          ["armeabi-v7a"]="arm:armv7a-linux-androideabi21-clang:7"
+          ["x86_64"]="amd64:x86_64-linux-android21-clang"
+        )
+        
+        TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+        
+        for ABI in "${!TARGETS[@]}"; do
+          IFS=':' read -r GOARCH CC_NAME GOARM <<< "${TARGETS[$ABI]}"
+          
+          echo "Building for $ABI (GOARCH=$GOARCH)..."
+          
+          OUTPUT_DIR="../android/app/src/main/jniLibs/$ABI"
+          mkdir -p "$OUTPUT_DIR"
+          
+          export CGO_ENABLED=1
+          export GOOS=android
+          export GOARCH=$GOARCH
+          export CC="$TOOLCHAIN/bin/$CC_NAME"
+          
+          if [ -n "$GOARM" ]; then
+            export GOARM=$GOARM
+          fi
+          
+          go build -v \
+            -buildmode=c-shared \
+            -tags "with_gvisor,cmfa" \
+            -ldflags="-s -w" \
+            -o "$OUTPUT_DIR/libclash.so" \
+            .
+          
+          unset GOARM
+          echo "✓ Built $ABI"
+        done
+        
+        echo "All core libraries built successfully!"
+    
+    - name: Upload Core Libraries
+      uses: actions/upload-artifact@v4
+      with:
+        name: core-libraries
+        path: android/app/src/main/jniLibs/
+        retention-days: 1
 
+  build-apk:
+    name: Build Android APK
+    needs: build-core
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Download Core Libraries
+      uses: actions/download-artifact@v4
+      with:
+        name: core-libraries
+        path: android/app/src/main/jniLibs/
+    
     - name: Setup Java
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
-
+    
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.16.x'
+        flutter-version: ${{ env.FLUTTER_VERSION }}
         channel: 'stable'
-
+        cache: true
+    
     - name: Get Dependencies
       run: flutter pub get
-
-    - name: Build APK
+    
+    - name: Build Release APK
+      run: flutter build apk --release --split-per-abi
+    
+    - name: Build Universal APK
       run: flutter build apk --release
+    
+    - name: Rename APKs
+      run: |
+        VERSION="${GITHUB_REF_NAME:-${{ github.event.inputs.version }}}"
+        VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+        
+        mkdir -p release
+        
+        # Rename split APKs
+        mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+           release/EdNovas-Clash-v${VERSION}-arm64-v8a.apk || true
+        mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+           release/EdNovas-Clash-v${VERSION}-armeabi-v7a.apk || true
+        mv build/app/outputs/flutter-apk/app-x86_64-release.apk \
+           release/EdNovas-Clash-v${VERSION}-x86_64.apk || true
+        
+        # Rename universal APK
+        mv build/app/outputs/flutter-apk/app-release.apk \
+           release/EdNovas-Clash-v${VERSION}-universal.apk || true
+        
+        ls -la release/
+    
+    - name: Upload APK Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: apk-release
+        path: release/*.apk
+        retention-days: 5
 
-    - name: Generate Release Notes
-      id: release_notes
-      uses: mikepenz/release-changelog-builder-action@v3
+  release:
+    name: Create GitHub Release
+    needs: build-apk
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download APK Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: apk-release
+        path: release/
+    
+    - name: Generate Changelog
+      id: changelog
+      uses: mikepenz/release-changelog-builder-action@v4
+      with:
+        configuration: |
+          {
+            "categories": [
+              {
+                "title": "## 🚀 Features",
+                "labels": ["feature", "enhancement"]
+              },
+              {
+                "title": "## 🐛 Bug Fixes",
+                "labels": ["bug", "fix"]
+              },
+              {
+                "title": "## 📝 Other Changes",
+                "labels": []
+              }
+            ]
+          }
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+    
     - name: Create Release
       uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
       with:
-        body: ${{ steps.release_notes.outputs.changelog }}
-        files: |
-          build/app/outputs/flutter-apk/app-release.apk
+        name: Release ${{ github.ref_name }}
+        body: |
+          ## EdNovas Clash Mobile ${{ github.ref_name }}
+          
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ### 📦 Downloads
+          
+          | Architecture | Description |
+          |-------------|-------------|
+          | `arm64-v8a` | 64-bit ARM devices (most modern phones) |
+          | `armeabi-v7a` | 32-bit ARM devices (older phones) |
+          | `x86_64` | 64-bit x86 devices (emulators, some tablets) |
+          | `universal` | All architectures (larger file size) |
+          
+          ### ⚠️ Notes
+          - This is a VPN client for EdNovas subscription service
+          - Requires valid EdNovas account to use
+        files: release/*.apk
+        draft: false
+        prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

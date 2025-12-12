@@ -1,0 +1,142 @@
+# EdNovas Clash Mobile
+
+<div align="center">
+
+![Version](https://img.shields.io/badge/version-v0.0.1-blue)
+![Platform](https://img.shields.io/badge/platform-Android-green)
+![Flutter](https://img.shields.io/badge/Flutter-3.24-02569B?logo=flutter)
+![License](https://img.shields.io/badge/license-MIT-orange)
+
+**EdNovas 订阅服务专属 VPN 客户端**
+
+[下载](#-下载) • [功能](#-功能) • [截图](#-截图) • [开发](#-开发) • [许可证](#-许可证)
+
+</div>
+
+---
+
+## 📱 简介
+
+EdNovas Clash Mobile 是一款专为 [EdNovas](https://ednovas.com) 订阅用户设计的 Android VPN 客户端。基于 [Mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta) 核心，提供高效、稳定的代理服务。
+
+## ✨ 功能
+
+- 🔐 **一键登录** - 使用 EdNovas 账号直接登录
+- 🚀 **自动配置** - 自动获取并更新订阅配置
+- 🌐 **TUN 模式** - 系统级代理，全局流量接管
+- 📊 **流量统计** - 实时显示连接状态和流量信息
+- 🎯 **智能分流** - 根据规则自动选择最优节点
+- 🔄 **节点切换** - 支持手动切换代理节点
+- 📱 **现代 UI** - Material Design 3 风格界面
+
+## 📦 下载
+
+从 [Releases](https://github.com/EdNovas/ednovas_clash_mobile/releases) 页面下载最新版本：
+
+| 文件名 | 架构 | 说明 |
+|--------|------|------|
+| `EdNovas-Clash-vX.X.X-arm64-v8a.apk` | ARM64 | 大多数现代手机（推荐） |
+| `EdNovas-Clash-vX.X.X-armeabi-v7a.apk` | ARM32 | 较旧的 32 位手机 |
+| `EdNovas-Clash-vX.X.X-x86_64.apk` | x86_64 | 模拟器、部分平板 |
+| `EdNovas-Clash-vX.X.X-universal.apk` | 通用 | 包含所有架构（文件较大） |
+
+> 💡 不确定选哪个？选择 `arm64-v8a` 版本，适用于 2016 年后发布的大多数 Android 手机。
+
+## 📸 截图
+
+<div align="center">
+<table>
+  <tr>
+    <td><img src="docs/screenshots/login.png" width="200" alt="登录页面"/></td>
+    <td><img src="docs/screenshots/home.png" width="200" alt="主页"/></td>
+    <td><img src="docs/screenshots/nodes.png" width="200" alt="节点选择"/></td>
+  </tr>
+  <tr>
+    <td align="center">登录</td>
+    <td align="center">主页</td>
+    <td align="center">节点</td>
+  </tr>
+</table>
+</div>
+
+## 🛠 开发
+
+### 环境要求
+
+- Flutter 3.24+
+- Go 1.22+
+- Android SDK & NDK r26b
+- Java 17
+
+### 本地编译
+
+1. **克隆仓库**
+   ```bash
+   git clone https://github.com/EdNovas/ednovas_clash_mobile.git
+   cd ednovas_clash_mobile
+   ```
+
+2. **编译 Go 核心库**
+   
+   Windows (PowerShell):
+   ```powershell
+   .\build_so.ps1
+   ```
+   
+   Linux/macOS:
+   ```bash
+   # 需要先设置 ANDROID_NDK_HOME 环境变量
+   cd core
+   
+   # 编译 arm64-v8a
+   CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
+     CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
+     go build -buildmode=c-shared -tags "with_gvisor,cmfa" -ldflags="-s -w" \
+     -o ../android/app/src/main/jniLibs/arm64-v8a/libclash.so .
+   ```
+
+3. **编译 Flutter APK**
+   ```bash
+   flutter pub get
+   flutter build apk --release
+   ```
+
+### 项目结构
+
+```
+ednovas_clash_mobile/
+├── android/                 # Android 原生代码
+│   └── app/src/main/
+│       ├── kotlin/          # Kotlin VPN 服务
+│       └── jniLibs/         # 编译后的 .so 文件
+├── core/                    # Go 核心代码
+│   ├── lib.go              # JNI 接口
+│   ├── tun/                # TUN 模块
+│   └── go.mod              # Go 依赖
+├── lib/                     # Flutter 代码
+│   ├── main.dart           # 入口
+│   ├── pages/              # 页面
+│   ├── services/           # 服务
+│   └── widgets/            # 组件
+└── .github/workflows/       # CI/CD 配置
+```
+
+## 📄 许可证
+
+本项目采用 [MIT License](LICENSE) 开源。
+
+## 🙏 致谢
+
+- [Mihomo](https://github.com/MetaCubeX/mihomo) - Clash Meta 核心
+- [sing-tun](https://github.com/SagerNet/sing-tun) - TUN 实现
+- [Flutter](https://flutter.dev/) - 跨平台 UI 框架
+
+---
+
+<div align="center">
+
+**[EdNovas](https://ednovas.com)** - 稳定、高速、安全的代理服务
+
+Made with ❤️ by EdNovas Team
+
+</div>
