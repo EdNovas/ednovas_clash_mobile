@@ -123,6 +123,30 @@ jobs:
     - name: Get Dependencies
       run: flutter pub get
     
+    - name: Generate App Icons
+      run: dart run flutter_launcher_icons
+    
+    - name: Setup Keystore
+      if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      env:
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      run: |
+        # Decode keystore from base64
+        echo "$KEYSTORE_BASE64" | base64 -d > android/app/ednovas-release-key.jks
+        
+        # Create key.properties
+        cat > android/key.properties << EOF
+        storePassword=$STORE_PASSWORD
+        keyPassword=$KEY_PASSWORD
+        keyAlias=$KEY_ALIAS
+        storeFile=ednovas-release-key.jks
+        EOF
+        
+        echo "✓ Keystore configured for release signing"
+    
     - name: Build Release APK
       run: flutter build apk --release --split-per-abi
     
