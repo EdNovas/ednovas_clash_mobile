@@ -127,13 +127,18 @@ jobs:
       run: dart run flutter_launcher_icons
     
     - name: Setup Keystore
-      if: ${{ secrets.KEYSTORE_BASE64 != '' }}
       env:
         KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
       run: |
+        # Only setup keystore if secrets are configured
+        if [ -z "$KEYSTORE_BASE64" ]; then
+          echo "⚠️ No keystore configured, using debug signing"
+          exit 0
+        fi
+        
         # Decode keystore from base64
         echo "$KEYSTORE_BASE64" | base64 -d > android/app/ednovas-release-key.jks
         
