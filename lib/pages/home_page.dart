@@ -11,6 +11,7 @@ import '../services/clash_service.dart';
 import '../widgets/node_selector_sheet.dart';
 import '../models/proxy_model.dart';
 import 'login_page.dart';
+import 'support_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -48,11 +49,46 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _pollingTimer?.cancel();
+    _stopTrafficMonitor();
     super.dispose();
   }
 
   // Polling Timer
   Timer? _pollingTimer;
+
+  // Traffic Monitor
+  StreamSubscription? _trafficSubscription;
+  int _upSpeed = 0;
+  int _downSpeed = 0;
+
+  void _startTrafficMonitor() {
+    _stopTrafficMonitor();
+    _trafficSubscription = _clash.getTrafficStream().listen((data) {
+      if (mounted) {
+        setState(() {
+          _upSpeed = data['up'] ?? 0;
+          _downSpeed = data['down'] ?? 0;
+        });
+      }
+    });
+  }
+
+  void _stopTrafficMonitor() {
+    _trafficSubscription?.cancel();
+    _trafficSubscription = null;
+    if (mounted) {
+      setState(() {
+        _upSpeed = 0;
+        _downSpeed = 0;
+      });
+    }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B/s';
+    if (bytes < 1048576) return '${(bytes / 1024).toStringAsFixed(1)} KB/s';
+    return '${(bytes / 1048576).toStringAsFixed(1)} MB/s';
+  }
 
   Future<void> _loadData() async {
     // 1. Check for Cached Config & Expiry (3 days strategy)
@@ -125,14 +161,13 @@ class _HomePageState extends State<HomePage> {
           _proxyGroups = groups;
           _isLoading = false;
 
-          // Check if valid subscription (plan_id exists)
-          if (userData['plan_id'] != null) {
-            _hasValidSubscription = true;
-          } else {
-            _hasValidSubscription = false;
-            if (mounted && !isPolling) {
-              Future.delayed(Duration.zero, () => _showNoSubscriptionDialog());
-            }
+          // Validate subscription status
+          final validationResult = _validateSubscription(userData);
+          _hasValidSubscription = validationResult.isValid;
+
+          if (!_hasValidSubscription && mounted && !isPolling) {
+            Future.delayed(Duration.zero,
+                () => _showSubscriptionIssueDialog(validationResult.reason));
           }
         });
       }
@@ -144,6 +179,116 @@ class _HomePageState extends State<HomePage> {
         );
       }
     }
+  }
+
+  // Subscription validation result
+  ({bool isValid, String reason}) _validateSubscription(
+      Map<String, dynamic>? userData) {
+    if (userData == null) {
+      return (isValid: false, reason: 'no_data');
+    }
+
+    // Check if plan exists
+    if (userData['plan_id'] == null) {
+      return (isValid: false, reason: 'no_plan');
+    }
+
+    // Check if expired
+    final expireTimestamp = userData['expired_at'];
+    if (expireTimestamp != null) {
+      final expireDate =
+          DateTime.fromMillisecondsSinceEpoch(expireTimestamp * 1000);
+      if (expireDate.isBefore(DateTime.now())) {
+        return (isValid: false, reason: 'expired');
+      }
+    }
+
+    // Check if traffic is used up
+    final usedBytes = (userData['u'] ?? 0) + (userData['d'] ?? 0);
+    final totalBytes = userData['transfer_enable'] ?? 0;
+    if (totalBytes > 0 && usedBytes >= totalBytes) {
+      return (isValid: false, reason: 'traffic_exhausted');
+    }
+
+    return (isValid: true, reason: 'valid');
+  }
+
+  void _showSubscriptionIssueDialog(String reason) {
+    String title;
+    String message;
+
+    switch (reason) {
+      case 'no_plan':
+        title = '尚未订阅';
+        message = '您还没有购买订阅服务。请先购买套餐以使用VPN服务。';
+        break;
+      case 'expired':
+        title = '订阅已过期';
+        message = '您的订阅已过期，请续费以继续使用服务。';
+        break;
+      case 'traffic_exhausted':
+        title = '流量已用尽';
+        message = '您的订阅流量已用完，请购买更多流量或升级套餐。';
+        break;
+      default:
+        title = '无法使用';
+        message = '无法验证您的订阅状态，请重新登录或联系客服。';
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF252525),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              reason == 'traffic_exhausted'
+                  ? Icons.data_usage
+                  : reason == 'expired'
+                      ? Icons.timer_off
+                      : Icons.shopping_cart,
+              color: Colors.orange,
+            ),
+            const SizedBox(width: 8),
+            Text(title,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(message, style: const TextStyle(color: Colors.grey)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _launchUrl('/#/stage/buysubs');
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.blueAccent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text('立即购买',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('稍后再说', style: TextStyle(color: Colors.grey))),
+          TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _logout();
+              },
+              child: const Text('退出登录', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -202,36 +347,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _showNoSubscriptionDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF252525),
-        title: const Text('No Subscription',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text(
-            'You do not have a valid subscription. Please purchase a plan to use the service.',
-            style: TextStyle(color: Colors.grey)),
-        actions: [
-          TextButton(
-            onPressed: () {
-              _launchUrl('/#/stage/buysubs');
-            },
-            child: const Text('Purchase',
-                style: TextStyle(color: Colors.blueAccent)),
-          ),
-          TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _logout();
-              },
-              child: const Text('Logout', style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -246,6 +361,11 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.support_agent, color: Colors.white),
+          onPressed: _openCrispChat,
+          tooltip: '联系客服',
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
@@ -283,6 +403,27 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Crisp Customer Support - Open embedded popup
+  void _openCrispChat() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: const BoxDecoration(
+          color: Color(0xFF141414),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: const SupportPage(),
       ),
     );
   }
@@ -408,10 +549,12 @@ class _HomePageState extends State<HomePage> {
       if (_isConnected) {
         print('Calling Stop...');
         await _clash.stop();
+        _stopTrafficMonitor();
         print('Stop called.');
       } else {
         print('Calling Start...');
         await _clash.start();
+        _startTrafficMonitor();
         print('Start called.');
       }
 
@@ -460,47 +603,95 @@ class _HomePageState extends State<HomePage> {
               curve: Curves.easeInOut)
         ],
         onPlay: (controller) => controller.repeat(reverse: true),
-        child: Container(
-          width: 200,
-          height: 200,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: LinearGradient(
-              colors: colors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: _isConnected || _isStarting
-                    ? Colors.blueAccent.withOpacity(0.4)
-                    : (canConnect ? Colors.black26 : Colors.transparent),
-                blurRadius: _isStarting ? 50 : 30,
-                spreadRadius: _isStarting ? 10 : 5,
-              )
-            ],
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              if (_isStarting)
-                SizedBox(
-                  width: 200,
-                  height: 200,
-                  child: CircularProgressIndicator(
-                      color: Colors.white.withOpacity(0.3), strokeWidth: 2),
+        child: Column(
+          children: [
+            Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: colors,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-              Icon(
-                Icons.power_settings_new,
-                size: 80,
-                color: (_isConnected || _isStarting)
-                    ? Colors.white
-                    : (canConnect ? Colors.grey[700] : Colors.grey[800]),
+                boxShadow: [
+                  BoxShadow(
+                    color: _isConnected || _isStarting
+                        ? Colors.blueAccent.withOpacity(0.4)
+                        : (canConnect ? Colors.black26 : Colors.transparent),
+                    blurRadius: _isStarting ? 50 : 30,
+                    spreadRadius: _isStarting ? 10 : 5,
+                  )
+                ],
               ),
-            ],
-          ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  if (_isStarting)
+                    SizedBox(
+                      width: 200,
+                      height: 200,
+                      child: CircularProgressIndicator(
+                          color: Colors.white.withOpacity(0.3), strokeWidth: 2),
+                    ),
+                  Icon(
+                    Icons.power_settings_new,
+                    size: 80,
+                    color: (_isConnected || _isStarting)
+                        ? Colors.white
+                        : (canConnect ? Colors.grey[700] : Colors.grey[800]),
+                  ),
+                ],
+              ),
+            ),
+            if (_isConnected) _buildTrafficStatus(),
+          ],
         ),
       ),
+    );
+  }
+
+  Widget _buildTrafficStatus() {
+    // Wrap with GestureDetector to absorb taps and prevent them from toggling VPN
+    return GestureDetector(
+      onTap: () {}, // Absorb tap, do nothing
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.only(top: 30),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(50),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.arrow_downward_rounded,
+                size: 16, color: Colors.greenAccent),
+            const SizedBox(width: 4),
+            Text(
+              _formatBytes(_downSpeed),
+              style: GoogleFonts.outfit(
+                  color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            Container(
+                height: 16,
+                width: 1,
+                color: Colors.white24,
+                margin: const EdgeInsets.symmetric(horizontal: 16)),
+            const Icon(Icons.arrow_upward_rounded,
+                size: 16, color: Colors.blueAccent),
+            const SizedBox(width: 4),
+            Text(
+              _formatBytes(_upSpeed),
+              style: GoogleFonts.outfit(
+                  color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ).animate().fadeIn().slideY(begin: 0.5),
     );
   }
 

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/proxy_model.dart';
 import 'config_parser_service.dart';
 import 'resource_service.dart';
@@ -487,5 +488,31 @@ dns:
     final latencyService = LatencyService();
     latencyService.registerAllNodes(allNodeNames.toList());
     latencyService.testAllNodes();
+  }
+
+  // --- Traffic Monitoring ---
+
+  // --- Traffic Monitoring ---
+
+  Stream<Map<String, dynamic>> getTrafficStream() {
+    try {
+      final uri = Uri.parse('ws://127.0.0.1:9090/traffic');
+      final channel = WebSocketChannel.connect(uri);
+
+      return channel.stream.map((event) {
+        try {
+          final data = json.decode(event);
+          return {'up': data['up'] ?? 0, 'down': data['down'] ?? 0};
+        } catch (e) {
+          return {'up': 0, 'down': 0};
+        }
+      }).handleError((e) {
+        // Return zeros on error
+        return {'up': 0, 'down': 0};
+      });
+    } catch (e) {
+      print('Failed to init traffic stream: $e');
+      return Stream.value({'up': 0, 'down': 0});
+    }
   }
 }
