@@ -49,9 +49,12 @@ EdNovas云 是一款专为 [EdNovas](https://ednovas.com) 订阅用户设计的 
 <div align="center">
 <table>
   <tr>
-    <td><img src="docs/screenshots/login.png" width="200" alt="登录页面"/></td>
-    <td><img src="docs/screenshots/home.png" width="200" alt="主页"/></td>
-    <td><img src="docs/screenshots/nodes.png" width="200" alt="节点选择"/></td>
+    <td><img width="200" alt="登录页面" src="https://github.com/user-attachments/assets/1162fa79-df6f-4994-8e73-40fd7e088710" />
+</td>
+    <td><img width="200" alt="主页" src="https://github.com/user-attachments/assets/21218082-17d5-4e9f-bd58-574391191259" />
+</td>
+    <td><img width="200" alt="节点选择" src="https://github.com/user-attachments/assets/5bbe6bf3-ca6c-499f-a9f4-5f86dd91f4d9" />
+</td>
   </tr>
   <tr>
     <td align="center">登录</td>
