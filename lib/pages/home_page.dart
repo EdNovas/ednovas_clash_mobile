@@ -1,9 +1,9 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
@@ -12,6 +12,7 @@ import '../widgets/node_selector_sheet.dart';
 import '../models/proxy_model.dart';
 import 'login_page.dart';
 import 'support_page.dart';
+import '../widgets/webview_sheet.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -82,12 +83,6 @@ class _HomePageState extends State<HomePage> {
         _downSpeed = 0;
       });
     }
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B/s';
-    if (bytes < 1048576) return '${(bytes / 1024).toStringAsFixed(1)} KB/s';
-    return '${(bytes / 1048576).toStringAsFixed(1)} MB/s';
   }
 
   Future<void> _loadData() async {
@@ -343,14 +338,25 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _launchUrl(String path) async {
-    final url = Uri.parse('${_api.baseUrl ?? 'https://new.ednovas.dev'}$path');
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not launch $url')));
-      }
-    }
+  Future<void> _launchUrl(String path, {String title = 'EdNovas'}) async {
+    final fullUrl = '${_api.baseUrl ?? 'https://new.ednovas.dev'}$path';
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: const BoxDecoration(
+          color: Color(0xFF141414),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: WebviewSheet(url: fullUrl, title: title),
+      ),
+    );
   }
 
   @override
@@ -473,28 +479,31 @@ class _HomePageState extends State<HomePage> {
                                 'My Plan')
                             : (_userInfo!['plan_name'] ?? 'My Plan'),
                         style: GoogleFonts.outfit(
-                            color: Colors.grey,
-                            fontSize: 13), // Slightly smaller font
+                            color: Colors
+                                .white, // Changed to white for better visibility
+                            fontSize: 18, // Increased from 13
+                            fontWeight: FontWeight.bold),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
                     ),
                     const Gap(8),
                     GestureDetector(
-                      onTap: () => _launchUrl('/#/stage/buysubs'),
+                      onTap: () =>
+                          _launchUrl('/#/stage/buysubs', title: '购买套餐'),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
+                            horizontal: 10, vertical: 4), // Increased padding
                         decoration: BoxDecoration(
                           color: Colors.blueAccent.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                               color: Colors.blueAccent.withOpacity(0.5)),
                         ),
-                        child: Text('Renew',
+                        child: Text('购买',
                             style: GoogleFonts.outfit(
                                 color: Colors.blueAccent,
-                                fontSize: 10,
+                                fontSize: 12, // Increased from 10
                                 fontWeight: FontWeight.bold)),
                       ),
                     ),
@@ -502,8 +511,10 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               const Gap(8),
-              Text('Expire: $expireDate',
-                  style: GoogleFonts.outfit(color: Colors.grey, fontSize: 12)),
+              Text('到期时间: $expireDate',
+                  style: GoogleFonts.outfit(
+                      color: Colors.grey[400],
+                      fontSize: 13)), // Increased from 12
             ],
           ),
           const Gap(10),
@@ -650,14 +661,14 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   if (_isStarting)
                     SizedBox(
-                      width: 200,
-                      height: 200,
+                      width: 240, // Increased
+                      height: 240, // Increased
                       child: CircularProgressIndicator(
                           color: Colors.white.withOpacity(0.3), strokeWidth: 2),
                     ),
                   Icon(
                     Icons.power_settings_new,
-                    size: 80,
+                    size: 100, // Increased from 80
                     color: (_isConnected || _isStarting)
                         ? Colors.white
                         : (canConnect ? Colors.grey[700] : Colors.grey[800]),
@@ -673,42 +684,67 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildTrafficStatus() {
-    // Wrap with GestureDetector to absorb taps and prevent them from toggling VPN
+    Widget buildSpeedItem(IconData icon, Color color, int bytes) {
+      String number = '0';
+      String unit = 'KB/s';
+      if (bytes > 0) {
+        const suffixes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+        var i = (log(bytes) / log(1024)).floor();
+        if (i >= suffixes.length) i = suffixes.length - 1;
+        number = (bytes / pow(1024, i)).toStringAsFixed(1);
+        unit = suffixes[i];
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            number,
+            style: GoogleFonts.outfit(
+                color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(width: 4),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 5),
+            child: Text(
+              unit,
+              style: GoogleFonts.outfit(
+                  color: Colors.grey[400],
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      );
+    }
+
     return GestureDetector(
-      onTap: () {}, // Absorb tap, do nothing
+      onTap: () {},
       behavior: HitTestBehavior.opaque,
       child: Container(
-        margin: const EdgeInsets.only(top: 30),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        margin: const EdgeInsets.only(top: 40),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(50),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
+          color: Colors.black.withOpacity(0.4),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withOpacity(0.05)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.arrow_downward_rounded,
-                size: 16, color: Colors.greenAccent),
-            const SizedBox(width: 4),
-            Text(
-              _formatBytes(_downSpeed),
-              style: GoogleFonts.outfit(
-                  color: Colors.white, fontWeight: FontWeight.bold),
-            ),
+            buildSpeedItem(
+                Icons.arrow_downward_rounded, Colors.greenAccent, _downSpeed),
             Container(
-                height: 16,
+                height: 24,
                 width: 1,
-                color: Colors.white24,
-                margin: const EdgeInsets.symmetric(horizontal: 16)),
-            const Icon(Icons.arrow_upward_rounded,
-                size: 16, color: Colors.blueAccent),
-            const SizedBox(width: 4),
-            Text(
-              _formatBytes(_upSpeed),
-              style: GoogleFonts.outfit(
-                  color: Colors.white, fontWeight: FontWeight.bold),
-            ),
+                color: Colors.white12,
+                margin: const EdgeInsets.symmetric(horizontal: 24)),
+            buildSpeedItem(
+                Icons.arrow_upward_rounded, Colors.blueAccent, _upSpeed),
           ],
         ),
       ).animate().fadeIn().slideY(begin: 0.5),
@@ -720,11 +756,12 @@ class _HomePageState extends State<HomePage> {
   Widget _buildModeSwitcher() {
     final modes = ['Rule', 'Global', 'Direct'];
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 10),
-      padding: const EdgeInsets.all(4),
+      margin: const EdgeInsets.symmetric(vertical: 24),
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color: const Color(0xFF252525),
-        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: Opacity(
         opacity: _isConnected ? 1.0 : 0.5,
@@ -752,13 +789,14 @@ class _HomePageState extends State<HomePage> {
                     color: isSelected ? Colors.blueAccent : Colors.transparent,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Center(
-                    child: Text(
-                      mode,
-                      style: GoogleFonts.outfit(
-                        color: isSelected ? Colors.white : Colors.grey,
-                        fontWeight: FontWeight.bold,
-                      ),
+                  child: Text(
+                    mode,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      color: isSelected ? Colors.white : Colors.grey[600],
+                      fontSize: 15,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.w500,
                     ),
                   ),
                 ),

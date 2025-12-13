@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:gap/gap.dart';
@@ -22,22 +23,47 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
   int _selectedGroupIndex = 0;
   bool _isGridView = true;
   final LatencyService _latencyService = LatencyService();
+  Timer? _cooldownTimer;
 
   @override
   void initState() {
     super.initState();
     // Listen to latency updates
     _latencyService.addListener(_onLatencyUpdate);
+    // Start cooldown timer if needed
+    _startCooldownTimer();
   }
 
   @override
   void dispose() {
+    _cooldownTimer?.cancel();
     _latencyService.removeListener(_onLatencyUpdate);
     super.dispose();
   }
 
+  void _startCooldownTimer() {
+    _cooldownTimer?.cancel();
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {});
+        // Stop timer when cooldown is done
+        if (_latencyService.canTest && !_latencyService.isTesting) {
+          timer.cancel();
+        }
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
   void _onLatencyUpdate() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      // Restart cooldown timer when testing completes
+      if (!_latencyService.isTesting && _latencyService.cooldownRemaining > 0) {
+        _startCooldownTimer();
+      }
+    }
   }
 
   /// Check if group type allows manual selection
@@ -178,6 +204,8 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
                     selectedColor: Colors.blueAccent,
                     backgroundColor: Colors.grey[800],
                     labelStyle: TextStyle(
+                        fontSize: 14, // Increased
+                        fontWeight: FontWeight.bold,
                         color: isSelected ? Colors.white : Colors.grey[400]),
                   ),
                 );
@@ -193,7 +221,7 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
-                      childAspectRatio: 2.5,
+                      childAspectRatio: 2.2, // Taller items
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
                     ),
@@ -231,7 +259,7 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
               widget.onNodeSelected(selectedGroup.name, node.name);
             }
           : null, // Disable tap for auto-select groups
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(16),
       child: Opacity(
         opacity: canManualSelect ? 1.0 : 0.8,
         child: Container(
@@ -239,11 +267,19 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
             color: isSelected
                 ? Colors.blueAccent.withOpacity(0.2)
                 : const Color(0xFF2C2C2C),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
                 color: isSelected ? Colors.blueAccent : Colors.white10),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                        color: Colors.blueAccent.withOpacity(0.1),
+                        blurRadius: 8,
+                        spreadRadius: 1)
+                  ]
+                : [],
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
               Expanded(
@@ -255,52 +291,62 @@ class _NodeSelectorSheetState extends State<NodeSelectorSheet> {
                       node.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: isSelected ? Colors.blueAccent : Colors.white,
-                          fontWeight: FontWeight.w500),
+                      style: GoogleFonts.outfit(
+                          color: isSelected ? Colors.white : Colors.white70,
+                          fontSize: 16, // Increased
+                          fontWeight: FontWeight.bold),
                     ),
-                    Row(
-                      children: [
-                        Text(
-                          node.type,
-                          style:
-                              TextStyle(color: Colors.grey[500], fontSize: 12),
-                        ),
-                        if (!canManualSelect && isSelected) ...[
-                          const SizedBox(width: 4),
-                          Icon(Icons.check_circle,
-                              size: 12, color: Colors.green[400]),
+                    // Only show latency row if we have data or are testing
+                    if (displayDelay != null || _latencyService.isTesting)
+                      Row(
+                        children: [
+                          // Latency Dot - only show if we have actual data
+                          if (displayDelay != null)
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: displayDelay >= 0
+                                    ? (displayDelay < 150
+                                        ? Colors.greenAccent
+                                        : Colors.orangeAccent)
+                                    : Colors.redAccent,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: (displayDelay >= 0
+                                            ? (displayDelay < 150
+                                                ? Colors.greenAccent
+                                                : Colors.orangeAccent)
+                                            : Colors.redAccent)
+                                        .withOpacity(0.5),
+                                    blurRadius: 4,
+                                  )
+                                ],
+                              ),
+                            ),
+                          if (displayDelay != null) const Gap(8),
+                          Text(
+                            displayDelay != null
+                                ? (displayDelay < 0
+                                    ? 'Timeout'
+                                    : '${displayDelay}ms')
+                                : (_latencyService.isTesting
+                                    ? 'Testing...'
+                                    : ''),
+                            style: GoogleFonts.outfit(
+                                color: Colors.grey[400],
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500),
+                          ),
                         ],
-                      ],
-                    ),
+                      ),
                   ],
                 ),
               ),
-              if (displayDelay != null)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: displayDelay < 0
-                        ? Colors.red.withOpacity(0.2)
-                        : displayDelay < 150
-                            ? Colors.green.withOpacity(0.2)
-                            : Colors.orange.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    displayDelay < 0 ? 'fail' : '${displayDelay}ms',
-                    style: TextStyle(
-                      color: displayDelay < 0
-                          ? Colors.red
-                          : displayDelay < 150
-                              ? Colors.green
-                              : Colors.orange,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
+              if (isSelected)
+                const Icon(Icons.check_circle_rounded,
+                    color: Colors.blueAccent, size: 22),
             ],
           ),
         ),

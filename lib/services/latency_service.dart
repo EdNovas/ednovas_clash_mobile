@@ -87,8 +87,11 @@ class LatencyService {
       return;
     }
 
-    _hasAutoTested = true;
-    await testNodesLatency(_allNodeNames, forceTest: true);
+    // Try to test - will set _hasAutoTested only if successful
+    final success = await testNodesLatency(_allNodeNames, forceTest: true);
+    if (success) {
+      _hasAutoTested = true;
+    }
   }
 
   /// Reset auto-test flag (call when user logs out)
@@ -98,82 +101,87 @@ class LatencyService {
   }
 
   /// Test latency for a list of nodes in the background
-  Future<void> testNodesLatency(List<String> nodeNames,
+  /// Returns true if test completed successfully, false otherwise
+  Future<bool> testNodesLatency(List<String> nodeNames,
       {bool forceTest = false}) async {
     if (_isTesting) {
       print('Latency test already in progress, skipping...');
-      return;
+      return false;
     }
 
     // Check cooldown (unless forced)
     if (!forceTest && !canTest) {
       print('Cooldown active. ${cooldownRemaining}s remaining.');
-      return;
+      return false;
     }
 
     _isTesting = true;
     _notifyListeners(); // Notify UI that testing started
     print('Starting background latency test for ${nodeNames.length} nodes...');
 
-    // Check if API is responsive first
     try {
-      await http
-          .get(Uri.parse('http://127.0.0.1:9090'))
-          .timeout(const Duration(seconds: 2));
-    } catch (e) {
-      print('API Root Check Failed: $e');
-      _isTesting = false;
-      _notifyListeners(); // Notify UI that testing stopped
-      return;
-    }
+      // Check if API is responsive first
+      try {
+        await http
+            .get(Uri.parse('http://127.0.0.1:9090'))
+            .timeout(const Duration(seconds: 2));
+      } catch (e) {
+        print('API Root Check Failed: $e');
+        return false;
+      }
 
-    // Test in batches of 5
-    for (var i = 0; i < nodeNames.length; i += 5) {
-      final end = (i + 5 < nodeNames.length) ? i + 5 : nodeNames.length;
-      final batch = nodeNames.sublist(i, end);
+      // Test in batches of 20 for faster parallel testing
+      for (var i = 0; i < nodeNames.length; i += 20) {
+        final end = (i + 20 < nodeNames.length) ? i + 20 : nodeNames.length;
+        final batch = nodeNames.sublist(i, end);
 
-      await Future.wait(batch.map((nodeName) async {
-        if (nodeName.isEmpty) return;
-        if (_latencyCache.containsKey(nodeName))
-          return; // Skip if already cached
+        await Future.wait(batch.map((nodeName) async {
+          if (nodeName.isEmpty) return;
 
-        try {
-          final url = Uri(
-            scheme: 'http',
-            host: '127.0.0.1',
-            port: 9090,
-            pathSegments: ['proxies', nodeName, 'delay'],
-            queryParameters: {
-              'timeout': '5000',
-              'url': 'http://www.gstatic.com/generate_204'
-            },
-          );
+          try {
+            final url = Uri(
+              scheme: 'http',
+              host: '127.0.0.1',
+              port: 9090,
+              pathSegments: ['proxies', nodeName, 'delay'],
+              queryParameters: {
+                'timeout': '3000', // Reduced from 5000
+                'url': 'http://www.gstatic.com/generate_204'
+              },
+            );
 
-          final response =
-              await http.get(url).timeout(const Duration(seconds: 3));
+            final response =
+                await http.get(url).timeout(const Duration(seconds: 3));
 
-          if (response.statusCode == 200) {
-            final data = json.decode(response.body);
-            final delay = data['delay'] as int?;
-            if (delay != null) {
-              setLatency(nodeName, delay);
+            if (response.statusCode == 200) {
+              final data = json.decode(response.body);
+              final delay = data['delay'] as int?;
+              if (delay != null) {
+                setLatency(nodeName, delay);
+              }
+            } else {
+              setLatency(nodeName, -1);
             }
-          } else {
+          } catch (e) {
             setLatency(nodeName, -1);
           }
-        } catch (e) {
-          setLatency(nodeName, -1);
-        }
-      }));
+        }));
 
-      // Small delay between batches
-      await Future.delayed(const Duration(milliseconds: 100));
+        // Minimal delay between batches
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
+
+      _lastTestTime = DateTime.now(); // Record time for cooldown
+      print('Background latency test completed.');
+      return true;
+    } catch (e) {
+      print('Latency test error: $e');
+      return false;
+    } finally {
+      // Always reset _isTesting
+      _isTesting = false;
+      _notifyListeners();
     }
-
-    _isTesting = false;
-    _lastTestTime = DateTime.now(); // Record time for cooldown
-    _notifyListeners(); // Notify UI that testing completed
-    print('Background latency test completed.');
   }
 
   /// Clear all cached latencies

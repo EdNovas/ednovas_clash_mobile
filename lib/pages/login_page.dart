@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import 'home_page.dart';
 import 'support_page.dart';
+import '../widgets/webview_sheet.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -69,13 +69,27 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _launchAuthPage(String path) async {
+  Future<void> _launchAuthPage(String path, {String title = 'Auth'}) async {
     final baseUrl = _api.baseUrl ?? 'https://new.ednovas.dev';
-    final url = Uri.parse('$baseUrl$path');
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not launch $url')));
-    }
+    final fullUrl = '$baseUrl$path';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: const BoxDecoration(
+          color: Color(0xFF141414),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: WebviewSheet(url: fullUrl, title: title),
+      ),
+    );
   }
 
   // Crisp Customer Support - Open embedded popup
@@ -121,7 +135,7 @@ class _LoginPageState extends State<LoginPage> {
               Text(
                 'EdNovas Clash',
                 style: GoogleFonts.outfit(
-                  fontSize: 32,
+                  fontSize: 36, // Increased
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
@@ -146,19 +160,22 @@ class _LoginPageState extends State<LoginPage> {
 
               SizedBox(
                 width: double.infinity,
-                height: 50,
+                height: 56, // Increased
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _doLogin,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                        borderRadius:
+                            BorderRadius.circular(16)), // Increased radius
                   ),
                   child: _isLoading
                       ? const CircularProgressIndicator(color: Colors.white)
                       : Text('Login',
                           style: GoogleFonts.outfit(
-                              fontSize: 18, color: Colors.white)),
+                              fontSize: 20, // Increased
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
                 ),
               ).animate().fadeIn().moveY(begin: 20),
 
@@ -168,14 +185,18 @@ class _LoginPageState extends State<LoginPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   TextButton(
-                    onPressed: () => _launchAuthPage('/#/register'),
+                    onPressed: () =>
+                        _launchAuthPage('/#/register', title: '注册账号'),
                     child: Text('Register',
-                        style: GoogleFonts.outfit(color: Colors.grey[500])),
+                        style: GoogleFonts.outfit(
+                            color: Colors.grey[500], fontSize: 16)),
                   ),
                   TextButton(
-                    onPressed: () => _launchAuthPage('/#/reset-password'),
+                    onPressed: () =>
+                        _launchAuthPage('/#/reset-password', title: '重置密码'),
                     child: Text('Forgot Password?',
-                        style: GoogleFonts.outfit(color: Colors.grey[500])),
+                        style: GoogleFonts.outfit(
+                            color: Colors.grey[500], fontSize: 16)),
                   ),
                 ],
               ).animate().fadeIn().moveY(begin: 20),
@@ -192,15 +213,17 @@ class _LoginPageState extends State<LoginPage> {
     return TextField(
       controller: controller,
       obscureText: isObscure,
-      style: const TextStyle(color: Colors.white),
+      style: const TextStyle(color: Colors.white, fontSize: 16), // Increased
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: Colors.grey[400]),
-        prefixIcon: Icon(icon, color: Colors.blueAccent),
+        labelStyle: TextStyle(color: Colors.grey[400], fontSize: 16),
+        prefixIcon: Icon(icon, color: Colors.blueAccent, size: 22),
         filled: true,
         fillColor: const Color(0xFF252525),
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: 20, vertical: 20), // Added padding
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16), // Increased
           borderSide: BorderSide.none,
         ),
       ),
