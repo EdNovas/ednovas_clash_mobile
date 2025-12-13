@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -5,44 +6,168 @@ class ApiService {
   Dio _dio = Dio();
   String? baseUrl;
 
-  // Migration Guide 1.1: Candidate URLs
-  static const List<String> _candidateUrls = [
-    'https://new.ednovas.dev', // Default
+  // Remote config URLs (try to fetch candidate URLs from these)
+  static const List<String> _remoteConfigUrls = [
+    'https://raw.githubusercontent.com/EdNovas/config/refs/heads/main/domains.json',
+    'https://aaa.ednovas.xyz/domains.json',
+  ];
+
+  // Hardcoded backup list (used if remote fetch fails)
+  static const List<String> _defaultBackups = [
+    'https://new.ednovas.dev',
     'https://new.ednovas.org',
     'https://cdn.ednovas.world',
   ];
 
+  // Dynamic candidate URLs (populated from remote + defaults)
+  List<String> _candidateUrls = [];
+
+  // Expose candidate URLs for external access
+  List<String> get candidateUrls =>
+      _candidateUrls.isEmpty ? _defaultBackups : _candidateUrls;
+
+  // Track failed URLs for intelligent retry
+  final Set<String> _failedUrls = {};
+
+  // Store URLs that passed latency test (sorted by speed)
+  List<String> _workingUrls = [];
+
+  // Track current URL index for round-robin rotation
+  int _currentUrlIndex = 0;
+
   ApiService() {
-    // Migration Guide 1.2: Timeout settings
-    _dio.options.connectTimeout = const Duration(seconds: 10);
-    _dio.options.receiveTimeout = const Duration(seconds: 10);
+    // Migration Guide 1.2: Increased timeout settings (10s -> 30s)
+    _dio.options.connectTimeout = const Duration(seconds: 30);
+    _dio.options.receiveTimeout = const Duration(seconds: 30);
+
+    // Initialize with defaults
+    _candidateUrls = List.from(_defaultBackups);
   }
 
   Future<void> init() async {
+    // Try to fetch remote config first
+    await _fetchRemoteConfig();
+
     // Guide 1.1: Dynamic Node Selection on Startup
     await findFastestUrl();
   }
 
+  // Fetch candidate URLs from remote JSON config
+  Future<void> _fetchRemoteConfig() async {
+    print('🔍 尝试从远程获取节点配置...');
+
+    final tempDio = Dio()
+      ..options.connectTimeout = const Duration(seconds: 5)
+      ..options.receiveTimeout = const Duration(seconds: 5);
+
+    for (final configUrl in _remoteConfigUrls) {
+      try {
+        print('  尝试: $configUrl');
+        final response = await tempDio.get(configUrl);
+
+        if (response.statusCode == 200) {
+          dynamic data = response.data;
+
+          // Handle if response is string (needs parsing)
+          if (data is String) {
+            data = json.decode(data);
+          }
+
+          // Support both array format and object with 'domains' key
+          List<String> urls = [];
+          if (data is List) {
+            urls = data.map((e) => e.toString()).toList();
+          } else if (data is Map && data['domains'] != null) {
+            urls = (data['domains'] as List).map((e) => e.toString()).toList();
+          }
+
+          if (urls.isNotEmpty) {
+            // Merge with defaults, removing duplicates
+            final allUrls = <String>{..._defaultBackups, ...urls};
+            _candidateUrls = allUrls.toList();
+            print('✅ 远程配置加载成功，共 ${_candidateUrls.length} 个节点');
+            return;
+          }
+        }
+      } catch (e) {
+        print('  ⚠️ 获取失败: $e');
+      }
+    }
+
+    print('ℹ️ 使用默认节点配置 (${_defaultBackups.length} 个)');
+    _candidateUrls = List.from(_defaultBackups);
+  }
+
+  // Switch to a different API URL (for retry logic)
+  // Prioritizes URLs that passed the latency test
+  Future<bool> switchToNextUrl() async {
+    // Use working URLs if available, otherwise fall back to all candidates
+    final urls = _workingUrls.isNotEmpty ? _workingUrls : candidateUrls;
+
+    // Try round-robin through working URLs
+    for (int i = 0; i < urls.length; i++) {
+      _currentUrlIndex = (_currentUrlIndex + 1) % urls.length;
+      final nextUrl = urls[_currentUrlIndex];
+
+      if (!_failedUrls.contains(nextUrl) && nextUrl != baseUrl) {
+        print('🔄 切换到节点 [${_currentUrlIndex + 1}/${urls.length}]: $nextUrl');
+        await setBaseUrl(nextUrl);
+        return true;
+      }
+    }
+
+    // All working URLs have been tried
+    print('⚠️ 所有可用节点都已尝试，重置');
+    _failedUrls.clear();
+    _currentUrlIndex = 0;
+
+    return false;
+  }
+
+  // Mark current URL as failed
+  void markCurrentUrlFailed() {
+    if (baseUrl != null) {
+      _failedUrls.add(baseUrl!);
+      print(
+          '❌ 标记节点失败: $baseUrl (已失败 ${_failedUrls.length}/${candidateUrls.length})');
+    }
+  }
+
   // Guide 1.1: Polling / Node Selection Logic
+  // Tests all candidate URLs and stores working ones sorted by speed
   Future<String> findFastestUrl() async {
     try {
+      print('🔍 测试所有节点延迟...');
       final results =
-          await Future.wait(_candidateUrls.map((url) => _checkLatency(url)));
+          await Future.wait(candidateUrls.map((url) => _checkLatency(url)));
       final successful = results.where((e) => e != null).toList();
 
       if (successful.isEmpty) {
+        print('⚠️ 所有节点延迟测试失败，使用默认节点');
+        _workingUrls = [];
         final fallback = 'https://new.ednovas.dev';
         await setBaseUrl(fallback);
         return fallback;
       }
 
+      // Sort by latency (fastest first)
       successful.sort((a, b) => a!.duration.compareTo(b!.duration));
 
-      final bestUrl = successful.first!.url;
+      // Store all working URLs for retry priority
+      _workingUrls = successful.map((e) => e!.url).toList();
+      _currentUrlIndex = 0;
+
+      print('✅ 延迟测试完成，${_workingUrls.length}/${candidateUrls.length} 个节点可用');
+      for (int i = 0; i < _workingUrls.length && i < 3; i++) {
+        print('   ${i + 1}. ${_workingUrls[i]} (${successful[i]!.duration}ms)');
+      }
+
+      final bestUrl = _workingUrls.first;
       await setBaseUrl(bestUrl);
       return bestUrl;
     } catch (e) {
       // Fallback
+      print('⚠️ 延迟测试异常: $e');
       return 'https://new.ednovas.dev';
     }
   }
@@ -112,7 +237,7 @@ class ApiService {
     }
   }
 
-  // Guide 2.3: Get Subscribe Info
+  // Guide 2.3: Get Subscribe Info (basic version)
   Future<Map<String, dynamic>> getSubscribe() async {
     final token = await getToken();
     if (token == null) throw Exception('Not logged in');
@@ -135,6 +260,56 @@ class ApiService {
     } catch (e) {
       throw Exception('Network error: $e');
     }
+  }
+
+  // Guide 2.3+: Get Subscribe Info with automatic retry and URL switching
+  // Max 3 retries, prioritizing nodes that passed latency test
+  Future<Map<String, dynamic>> getSubscribeWithRetry(
+      {int maxRetries = 3}) async {
+    final token = await getToken();
+    if (token == null) throw Exception('Not logged in');
+
+    Exception? lastError;
+
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        print('🚀 获取订阅... (尝试 $attempt/$maxRetries, 节点: $baseUrl)');
+
+        final response = await _dio.get(
+          '/api/v1/user/getSubscribe',
+          queryParameters: {'auth_data': token},
+          options: Options(
+            headers: {'Authorization': token},
+            receiveTimeout: const Duration(seconds: 30),
+          ),
+        );
+
+        if (response.statusCode == 200) {
+          print('✅ 订阅获取成功');
+          return response.data['data'];
+        } else {
+          throw Exception('Failed with status ${response.statusCode}');
+        }
+      } catch (e) {
+        lastError = Exception('$e');
+        print('⚠️ 获取订阅失败: $e');
+
+        // Mark current URL as failed and try switching
+        markCurrentUrlFailed();
+
+        if (attempt < maxRetries) {
+          final switched = await switchToNextUrl();
+          if (switched) {
+            print('🔄 切换到备用节点: $baseUrl');
+          } else {
+            print('⏳ 等待 2 秒后重试...');
+            await Future.delayed(const Duration(seconds: 2));
+          }
+        }
+      }
+    }
+
+    throw lastError ?? Exception('获取订阅失败');
   }
 
   // Get User General Info (includes plan name)

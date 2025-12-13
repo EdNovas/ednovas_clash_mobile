@@ -147,7 +147,8 @@ class _HomePageState extends State<HomePage> {
     if (!isPolling) setState(() => _isLoading = true);
 
     try {
-      final userData = await _api.getSubscribe();
+      // Use retry version for better reliability with automatic URL switching
+      final userData = await _api.getSubscribeWithRetry();
       // Also fetch detailed info for plan name
       final detailedInfo = await _api.getUserInfo();
       if (detailedInfo.isNotEmpty) {
