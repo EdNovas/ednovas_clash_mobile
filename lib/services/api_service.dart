@@ -137,6 +137,30 @@ class ApiService {
     }
   }
 
+  // Get User General Info (includes plan name)
+  Future<Map<String, dynamic>> getUserInfo() async {
+    final token = await getToken();
+    if (token == null) throw Exception('Not logged in');
+
+    try {
+      final response = await _dio.get(
+        '/api/v1/user/info',
+        options: Options(
+          headers: {'Authorization': token},
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        return response.data['data'];
+      } else {
+        throw Exception('Failed to get user info');
+      }
+    } catch (e) {
+      print('Get user info error: $e');
+      return {}; // Return empty map on failure to not break flow
+    }
+  }
+
   // Guide 3.1 & 3.2: Construct and Download Config
   Future<String> fetchConfigContent(String input) async {
     if (baseUrl == null) await findFastestUrl();

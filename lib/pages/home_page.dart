@@ -153,6 +153,12 @@ class _HomePageState extends State<HomePage> {
 
     try {
       final userData = await _api.getSubscribe();
+      // Also fetch detailed info for plan name
+      final detailedInfo = await _api.getUserInfo();
+      if (detailedInfo.isNotEmpty) {
+        userData.addAll(detailedInfo);
+      }
+
       final groups = await _clash.getProxyGroups();
 
       if (mounted) {
@@ -456,34 +462,48 @@ class _HomePageState extends State<HomePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Text('My Plan',
-                      style:
-                          GoogleFonts.outfit(color: Colors.grey, fontSize: 14)),
-                  const Gap(8),
-                  GestureDetector(
-                    onTap: () => _launchUrl('/#/stage/buysubs'),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.blueAccent.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Colors.blueAccent.withOpacity(0.5)),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        _userInfo!['plan'] != null
+                            ? (_userInfo!['plan']['name'] ??
+                                _userInfo!['plan_name'] ??
+                                'My Plan')
+                            : (_userInfo!['plan_name'] ?? 'My Plan'),
+                        style: GoogleFonts.outfit(
+                            color: Colors.grey,
+                            fontSize: 13), // Slightly smaller font
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
-                      child: Text('Renew',
-                          style: GoogleFonts.outfit(
-                              color: Colors.blueAccent,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold)),
                     ),
-                  ),
-                ],
+                    const Gap(8),
+                    GestureDetector(
+                      onTap: () => _launchUrl('/#/stage/buysubs'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.blueAccent.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: Colors.blueAccent.withOpacity(0.5)),
+                        ),
+                        child: Text('Renew',
+                            style: GoogleFonts.outfit(
+                                color: Colors.blueAccent,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const Gap(8),
               Text('Expire: $expireDate',
-                  style: GoogleFonts.outfit(color: Colors.grey, fontSize: 14)),
+                  style: GoogleFonts.outfit(color: Colors.grey, fontSize: 12)),
             ],
           ),
           const Gap(10),
