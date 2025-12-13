@@ -4,7 +4,7 @@
 
 <img src="assets/icon.png" width="120" alt="EdNovas云 Logo"/>
 
-![Version](https://img.shields.io/badge/version-v0.0.1-blue)
+![Version](https://img.shields.io/badge/version-v0.0.7-blue)
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.24-02569B?logo=flutter)
 ![License](https://img.shields.io/badge/license-MIT-orange)
