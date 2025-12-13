@@ -254,20 +254,26 @@ jobs:
       with:
         name: EdNovas云 ${{ github.ref_name }}
         body: |
-          ## EdNovas云 ${{ github.ref_name }}
+          ## 📥 下载地址 / Downloads
           
-          ### 📋 更新日志
+          注意 / Note: 请根据您的设备架构选择对应的安装包。如有问题，请尝试卸载旧版本后重装。
+          
+          ### 🤖 Android
+          
+          | 版本 | 架构 | 适用设备 | 下载 (Download) |
+          |------|------|----------|-----------------|
+          | 安装包 (推荐) | arm64-v8a | 大多数现代手机 | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-arm64-v8a.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-arm64-v8a.apk) |
+          | 安装包 | armeabi-v7a | 较旧的 32 位手机 | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-armeabi-v7a.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-armeabi-v7a.apk) |
+          | 安装包 | x86_64 | 模拟器、部分平板 | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-x86_64.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-x86_64.apk) |
+          | 通用包 | 全架构 | 所有设备（文件较大） | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-universal.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-universal.apk) |
+          
+          ---
+          
+          ### 🔄 变更日志 / Changelog
           
           ${{ steps.changelog.outputs.CHANGELOG }}
           
-          ### 📦 下载说明
-          
-          | 文件 | 架构 | 适用设备 |
-          |------|------|----------|
-          | `arm64-v8a` | ARM64 | 大多数现代手机（推荐） |
-          | `armeabi-v7a` | ARM32 | 较旧的 32 位手机 |
-          | `x86_64` | x86_64 | 模拟器、部分平板 |
-          | `universal` | 通用 | 包含所有架构（文件较大） |
+          ---
           
           ### ⚠️ 注意事项
           - 本应用为 EdNovas 订阅服务专属 VPN 客户端
