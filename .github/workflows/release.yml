@@ -1,0 +1,286 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.0.1)'
+        required: false
+        default: 'dev'
+
+env:
+  GO_VERSION: '1.22'
+  FLUTTER_VERSION: '3.24.x'
+  NDK_VERSION: 'r26b'
+
+jobs:
+  build-core:
+    name: Build Clash Core Libraries
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache-dependency-path: core/go.sum
+    
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: ${{ env.NDK_VERSION }}
+        add-to-path: true
+    
+    - name: Build Core Libraries
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      run: |
+        cd core
+        
+        # Define build targets
+        declare -A TARGETS=(
+          ["arm64-v8a"]="arm64:aarch64-linux-android21-clang"
+          ["armeabi-v7a"]="arm:armv7a-linux-androideabi21-clang:7"
+          ["x86_64"]="amd64:x86_64-linux-android21-clang"
+        )
+        
+        TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+        
+        for ABI in "${!TARGETS[@]}"; do
+          IFS=':' read -r GOARCH CC_NAME GOARM <<< "${TARGETS[$ABI]}"
+          
+          echo "Building for $ABI (GOARCH=$GOARCH)..."
+          
+          OUTPUT_DIR="../android/app/src/main/jniLibs/$ABI"
+          mkdir -p "$OUTPUT_DIR"
+          
+          export CGO_ENABLED=1
+          export GOOS=android
+          export GOARCH=$GOARCH
+          export CC="$TOOLCHAIN/bin/$CC_NAME"
+          
+          if [ -n "$GOARM" ]; then
+            export GOARM=$GOARM
+          fi
+          
+          go build -v \
+            -buildmode=c-shared \
+            -tags "with_gvisor,cmfa" \
+            -ldflags="-s -w" \
+            -o "$OUTPUT_DIR/libclash.so" \
+            .
+          
+          unset GOARM
+          echo "✓ Built $ABI"
+        done
+        
+        echo "All core libraries built successfully!"
+    
+    - name: Upload Core Libraries
+      uses: actions/upload-artifact@v4
+      with:
+        name: core-libraries
+        path: android/app/src/main/jniLibs/
+        retention-days: 1
+
+  build-apk:
+    name: Build Android APK
+    needs: build-core
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Download Core Libraries
+      uses: actions/download-artifact@v4
+      with:
+        name: core-libraries
+        path: android/app/src/main/jniLibs/
+    
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
+        channel: 'stable'
+        cache: true
+    
+    - name: Get Dependencies
+      run: flutter pub get
+    
+    - name: Generate App Icons
+      run: dart run flutter_launcher_icons
+    
+    - name: Setup Keystore
+      env:
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      run: |
+        # Only setup keystore if secrets are configured
+        if [ -z "$KEYSTORE_BASE64" ]; then
+          echo "⚠️ No keystore configured, using debug signing"
+          exit 0
+        fi
+        
+        # Decode keystore from base64
+        echo "$KEYSTORE_BASE64" | base64 -d > android/app/ednovas-release-key.jks
+        
+        # Create key.properties
+        cat > android/key.properties << EOF
+        storePassword=$STORE_PASSWORD
+        keyPassword=$KEY_PASSWORD
+        keyAlias=$KEY_ALIAS
+        storeFile=ednovas-release-key.jks
+        EOF
+        
+        echo "✓ Keystore configured for release signing"
+    
+    - name: Build Release APK
+      run: flutter build apk --release --split-per-abi
+    
+    - name: Build Universal APK
+      run: flutter build apk --release
+    
+    - name: Rename APKs
+      run: |
+        VERSION="${GITHUB_REF_NAME:-${{ github.event.inputs.version }}}"
+        VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+        
+        mkdir -p release
+        
+        # Rename split APKs
+        mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+           release/EdNovas-Clash-v${VERSION}-arm64-v8a.apk || true
+        mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+           release/EdNovas-Clash-v${VERSION}-armeabi-v7a.apk || true
+        mv build/app/outputs/flutter-apk/app-x86_64-release.apk \
+           release/EdNovas-Clash-v${VERSION}-x86_64.apk || true
+        
+        # Rename universal APK
+        mv build/app/outputs/flutter-apk/app-release.apk \
+           release/EdNovas-Clash-v${VERSION}-universal.apk || true
+        
+        ls -la release/
+    
+    - name: Upload APK Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: apk-release
+        path: release/*.apk
+        retention-days: 5
+
+  release:
+    name: Create GitHub Release
+    needs: build-apk
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Download APK Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: apk-release
+        path: release/
+    
+    - name: Generate Changelog
+      id: changelog
+      run: |
+        # Get the previous tag
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        
+        # Generate changelog
+        if [ -z "$PREV_TAG" ]; then
+          CHANGELOG="- 🎉 初始版本发布"
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD 2>/dev/null | head -30)
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- 🔧 小修复和改进"
+          fi
+        fi
+        
+        # Output using heredoc for multi-line
+        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        # Debug output
+        echo "=== Generated Changelog ==="
+        echo "$CHANGELOG"
+    
+    - name: Update README Version Badge
+      run: |
+        VERSION="${GITHUB_REF_NAME}"
+        # Update version badge in README.md
+        sed -i "s|version-v[0-9]*\.[0-9]*\.[0-9]*-blue|version-${VERSION}-blue|g" README.md
+        
+        # Check if there are changes
+        if git diff --quiet README.md; then
+          echo "No version changes in README"
+        else
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: update version badge to ${VERSION}"
+          git push origin HEAD:main || echo "Could not push to main, continuing..."
+        fi
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: EdNovas云 ${{ github.ref_name }}
+        body: |
+          ## 📥 下载地址 / Downloads
+          
+          注意 / Note: 请根据您的设备架构选择对应的安装包。如有问题，请尝试卸载旧版本后重装。
+          
+          ### 🤖 Android
+          
+          | 版本 | 架构 | 适用设备 | 下载 (Download) |
+          |------|------|----------|-----------------|
+          | 安装包 (推荐) | arm64-v8a | 大多数现代手机 | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-arm64-v8a.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-arm64-v8a.apk) |
+          | 安装包 | armeabi-v7a | 较旧的 32 位手机 | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-armeabi-v7a.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-armeabi-v7a.apk) |
+          | 安装包 | x86_64 | 模拟器、部分平板 | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-x86_64.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-x86_64.apk) |
+          | 通用包 | 全架构 | 所有设备（文件较大） | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-universal.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-universal.apk) |
+          
+          ---
+          
+          ### 🔄 变更日志 / Changelog
+          
+          ${{ steps.changelog.outputs.CHANGELOG }}
+          
+          ---
+          
+          ### ⚠️ 注意事项
+          - 本应用为 EdNovas 订阅服务专属 VPN 客户端
+          - 需要有效的 EdNovas 账号才能使用
+          - 首次使用请先在设置中登录账号
+        files: release/*.apk
+        draft: false
+        prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
