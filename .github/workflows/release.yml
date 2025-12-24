@@ -157,10 +157,14 @@ jobs:
         
         # Setup google-services.json
         if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "Secret found, length: ${#GOOGLE_SERVICES_JSON}"
             echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
             echo "✓ google-services.json configured"
+            ls -la android/app/google-services.json
         else
-            echo "⚠️ No google-services.json configured, build may fail"
+            echo "⚠️ No google-services.json configured (Secret is empty)"
+            echo "Current Directory: $(pwd)"
+            ls -la android/app/
         fi
     
     - name: Build Release APK
