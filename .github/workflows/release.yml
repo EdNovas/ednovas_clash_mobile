@@ -134,6 +134,7 @@ jobs:
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
       run: |
         # Only setup keystore if secrets are configured
         if [ -z "$KEYSTORE_BASE64" ]; then
@@ -153,6 +154,14 @@ jobs:
         EOF
         
         echo "✓ Keystore configured for release signing"
+        
+        # Setup google-services.json
+        if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+            echo "✓ google-services.json configured"
+        else
+            echo "⚠️ No google-services.json configured, build may fail"
+        fi
     
     - name: Build Release APK
       run: flutter build apk --release --split-per-abi
