@@ -375,7 +375,11 @@ class ApiService {
     }
   }
 
+  // Subscription proxy that can auto-detect and proxy subscription links
+  static const String _subscriptionProxyUrl = 'https://re.ednovas.life';
+
   // Guide 3.1 & 3.2: Construct and Download Config
+  // First tries through subscription proxy (re.ednovas.life), falls back to direct
   Future<String> fetchConfigContent(String input) async {
     if (baseUrl == null) await findFastestUrl();
 
@@ -392,12 +396,38 @@ class ApiService {
       finalUrl = '$cleanApiUrl/2cvme3wa8i/$input?flag=clash';
     }
 
+    final Dio downloadDio = Dio()
+      ..options.connectTimeout = const Duration(seconds: 10)
+      ..options.receiveTimeout = const Duration(seconds: 15);
+
+    // Try subscription proxy first (re.ednovas.life can auto-detect and proxy)
     try {
-      final Dio downloadDio = Dio();
+      print('🔗 尝试通过订阅代理获取: $_subscriptionProxyUrl');
+      final proxyUrl =
+          '$_subscriptionProxyUrl/${Uri.encodeComponent(finalUrl)}';
+      final response = await downloadDio.get(proxyUrl,
+          options: Options(
+              headers: {'User-Agent': 'ClashforWindows/0.19.0'},
+              responseType: ResponseType.plain));
+
+      if (response.statusCode == 200 &&
+          response.data != null &&
+          response.data.toString().trim().isNotEmpty) {
+        print('✅ 订阅代理获取成功');
+        return response.data.toString();
+      }
+    } catch (e) {
+      print('⚠️ 订阅代理失败: $e, 尝试直接请求...');
+    }
+
+    // Fallback to direct request
+    try {
+      print('🔗 直接请求订阅: $finalUrl');
       final response = await downloadDio.get(finalUrl,
           options: Options(
               headers: {'User-Agent': 'ClashforWindows/0.19.0'},
               responseType: ResponseType.plain));
+      print('✅ 直接请求成功');
       return response.data.toString();
     } catch (e) {
       throw Exception('Failed to download config ($finalUrl): $e');
