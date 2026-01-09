@@ -407,7 +407,7 @@ class ApiService {
           '$_subscriptionProxyUrl/${Uri.encodeComponent(finalUrl)}';
       final response = await downloadDio.get(proxyUrl,
           options: Options(
-              headers: {'User-Agent': 'ClashforWindows/0.19.0'},
+              headers: {'User-Agent': 'ednovasclashmobile'},
               responseType: ResponseType.plain));
 
       if (response.statusCode == 200 &&
@@ -425,7 +425,7 @@ class ApiService {
       print('🔗 直接请求订阅: $finalUrl');
       final response = await downloadDio.get(finalUrl,
           options: Options(
-              headers: {'User-Agent': 'ClashforWindows/0.19.0'},
+              headers: {'User-Agent': 'ednovasclashmobile'},
               responseType: ResponseType.plain));
       print('✅ 直接请求成功');
       return response.data.toString();
