@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'user_agent_service.dart';
 
 class ApiService {
   Dio _dio = Dio();
@@ -39,6 +40,9 @@ class ApiService {
     // Migration Guide 1.2: Increased timeout settings (10s -> 30s)
     _dio.options.connectTimeout = const Duration(seconds: 30);
     _dio.options.receiveTimeout = const Duration(seconds: 30);
+
+    // Set unified User-Agent for all requests
+    _dio.options.headers['User-Agent'] = UserAgentService().userAgent;
 
     // Initialize with defaults
     _candidateUrls = List.from(_defaultBackups);
@@ -407,7 +411,7 @@ class ApiService {
           '$_subscriptionProxyUrl/${Uri.encodeComponent(finalUrl)}';
       final response = await downloadDio.get(proxyUrl,
           options: Options(
-              headers: {'User-Agent': 'ednovasclashmobile'},
+              headers: UserAgentService().headers,
               responseType: ResponseType.plain));
 
       if (response.statusCode == 200 &&
@@ -425,7 +429,7 @@ class ApiService {
       print('🔗 直接请求订阅: $finalUrl');
       final response = await downloadDio.get(finalUrl,
           options: Options(
-              headers: {'User-Agent': 'ednovasclashmobile'},
+              headers: UserAgentService().headers,
               responseType: ResponseType.plain));
       print('✅ 直接请求成功');
       return response.data.toString();

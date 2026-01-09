@@ -2,6 +2,7 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:convert';
 import 'package:url_launcher/url_launcher.dart';
+import 'user_agent_service.dart';
 
 class UpdateService {
   // Replace with actual API endpoint
@@ -21,7 +22,10 @@ class UpdateService {
       //   'note': 'Fix bugs'
       // };
 
-      final response = await http.get(Uri.parse(UPDATE_URL));
+      final response = await http.get(
+        Uri.parse(UPDATE_URL),
+        headers: UserAgentService().headers,
+      );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final remoteVersion = data['version'];

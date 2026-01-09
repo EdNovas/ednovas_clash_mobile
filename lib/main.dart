@@ -9,11 +9,15 @@ import 'l10n/app_localizations.dart';
 
 import 'pages/home_page.dart';
 import 'services/theme_service.dart';
+import 'services/user_agent_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp();
+
+  // Initialize UserAgentService to get version for all HTTP requests
+  await UserAgentService().init();
 
   // Set minimal system UI overlay style for splash
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'user_agent_service.dart';
 
 /// Global latency cache and background testing service
 class LatencyService {
@@ -123,7 +124,10 @@ class LatencyService {
       // Check if API is responsive first
       try {
         await http
-            .get(Uri.parse('http://127.0.0.1:9090'))
+            .get(
+              Uri.parse('http://127.0.0.1:9090'),
+              headers: UserAgentService().headers,
+            )
             .timeout(const Duration(seconds: 2));
       } catch (e) {
         print('API Root Check Failed: $e');
@@ -150,8 +154,12 @@ class LatencyService {
               },
             );
 
-            final response =
-                await http.get(url).timeout(const Duration(seconds: 3));
+            final response = await http
+                .get(
+                  url,
+                  headers: UserAgentService().headers,
+                )
+                .timeout(const Duration(seconds: 3));
 
             if (response.statusCode == 200) {
               final data = json.decode(response.body);

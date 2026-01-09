@@ -9,6 +9,7 @@ import '../models/proxy_model.dart';
 import 'config_parser_service.dart';
 import 'resource_service.dart';
 import 'latency_service.dart';
+import 'user_agent_service.dart';
 
 import 'dart:async'; // Add this
 
@@ -337,7 +338,10 @@ dns:
 
       final response = await http.put(
         url,
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          ...UserAgentService().headers,
+        },
         body: json.encode({'name': nodeName}),
       );
 
@@ -424,7 +428,12 @@ dns:
   Future<bool> testClashApi() async {
     try {
       final url = Uri.parse('http://127.0.0.1:9090/version');
-      final response = await http.get(url).timeout(const Duration(seconds: 3));
+      final response = await http
+          .get(
+            url,
+            headers: UserAgentService().headers,
+          )
+          .timeout(const Duration(seconds: 3));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         print('Clash API Connected: Version ${data['version']}');
@@ -441,7 +450,12 @@ dns:
   Future<Map<String, dynamic>> getTrafficStats() async {
     try {
       final url = Uri.parse('http://127.0.0.1:9090/traffic');
-      final response = await http.get(url).timeout(const Duration(seconds: 3));
+      final response = await http
+          .get(
+            url,
+            headers: UserAgentService().headers,
+          )
+          .timeout(const Duration(seconds: 3));
       if (response.statusCode == 200) {
         return json.decode(response.body);
       }
