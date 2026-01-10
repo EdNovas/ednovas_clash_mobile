@@ -215,19 +215,18 @@ jobs:
     
     - name: Install gomobile
       run: |
-        # Download and install the full golang.org/x/mobile package
-        go get -d golang.org/x/mobile/...
-        
         # Install gomobile and gobind
         go install golang.org/x/mobile/cmd/gomobile@latest
         go install golang.org/x/mobile/cmd/gobind@latest
+        
+        # Add GOPATH/bin to PATH
+        export PATH=$PATH:$(go env GOPATH)/bin
         
         # Verify installation
         which gomobile
         which gobind
         
-        # Initialize gomobile with explicit GOPATH
-        export PATH=$PATH:$(go env GOPATH)/bin
+        # Initialize gomobile
         gomobile init
         
         echo "✅ gomobile initialized"
@@ -238,12 +237,12 @@ jobs:
         
         cd core/ios
         
-        # Download dependencies
+        # Add mobile/bind dependency to go.mod
+        go get golang.org/x/mobile/bind@latest
+        
+        # Download all dependencies
         go mod tidy
         go mod download
-        
-        # Also get the mobile/bind package in the context of our module
-        go get golang.org/x/mobile/bind
         
         mkdir -p ../../ios/Frameworks
         
@@ -332,26 +331,103 @@ jobs:
         
         echo "✅ iOS signing configured"
     
-    - name: Build iOS (No Codesign)
+    - name: Build iOS Release
       if: env.SKIP_IOS != 'true'
       run: |
+        # Build iOS app (Flutter handles code signing via Xcode)
         flutter build ios --release --no-codesign
-        echo "✅ iOS build completed (unsigned)"
+        
+        echo "✅ iOS build completed"
     
-    - name: Create Unsigned IPA
+    - name: Archive and Export IPA
       if: env.SKIP_IOS != 'true'
       run: |
         VERSION="${GITHUB_REF_NAME:-${{ github.event.inputs.version }}}"
         VERSION="${VERSION#v}"
         
-        mkdir -p release
-        cd build/ios/iphoneos
-        mkdir Payload
-        cp -r Runner.app Payload/
-        zip -r ../../../release/EdNovas-Clash-v${VERSION}-ios-unsigned.ipa Payload
+        cd ios
         
-        echo "✅ Unsigned IPA created"
-        ls -la ../../../release/
+        # Create archive
+        xcodebuild -workspace Runner.xcworkspace \
+          -scheme Runner \
+          -configuration Release \
+          -archivePath build/Runner.xcarchive \
+          archive \
+          CODE_SIGN_STYLE=Manual \
+          -allowProvisioningUpdates
+        
+        # Export IPA
+        mkdir -p ../release
+        
+        # Create export options plist
+        cat > ExportOptions.plist << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>destination</key>
+            <string>upload</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+                <key>com.ednovas.ednovasClashMobile</key>
+                <string>EdNovas Clash Dist</string>
+                <key>com.ednovas.ednovasClashMobile.PacketTunnel</key>
+                <string>EdNovas PacketTunnel Dist</string>
+            </dict>
+        </dict>
+        </plist>
+        EOF
+        
+        xcodebuild -exportArchive \
+          -archivePath build/Runner.xcarchive \
+          -exportPath ../release \
+          -exportOptionsPlist ExportOptions.plist
+        
+        # Rename IPA
+        mv ../release/Runner.ipa ../release/EdNovas-Clash-v${VERSION}-ios.ipa || true
+        
+        echo "✅ IPA exported"
+        ls -la ../release/
+    
+    - name: Upload to TestFlight
+      if: env.SKIP_IOS != 'true' && github.ref_type == 'tag'
+      env:
+        APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+        APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+      run: |
+        # Skip if no API key configured
+        if [ -z "$APP_STORE_CONNECT_API_KEY_ID" ]; then
+          echo "⚠️ No App Store Connect API key configured, skipping TestFlight upload"
+          exit 0
+        fi
+        
+        # Decode API key
+        echo "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 -d > AuthKey.p8
+        
+        # Find IPA file
+        IPA_PATH=$(find release -name "*.ipa" | head -1)
+        
+        if [ -z "$IPA_PATH" ]; then
+          echo "❌ No IPA file found"
+          exit 1
+        fi
+        
+        echo "📤 Uploading $IPA_PATH to TestFlight..."
+        
+        # Upload using xcrun altool
+        xcrun altool --upload-app \
+          --type ios \
+          --file "$IPA_PATH" \
+          --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
+          --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
+          --verbose
+        
+        echo "✅ Uploaded to TestFlight!"
     
     - name: Upload IPA Artifact
       if: env.SKIP_IOS != 'true'
