@@ -286,9 +286,9 @@ jobs:
     
     - name: Verify iOS Core Framework
       run: |
-        if [ -d "ios/Frameworks/Clashcore.xcframework" ]; then
+        if [ -d "ios/Clashcore.xcframework" ]; then
           echo "✅ Clashcore.xcframework found"
-          ls -la ios/Frameworks/Clashcore.xcframework/
+          ls -la ios/Clashcore.xcframework/
         else
           echo "❌ Clashcore.xcframework not found!"
           exit 1
