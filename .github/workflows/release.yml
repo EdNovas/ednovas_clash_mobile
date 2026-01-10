@@ -215,30 +215,36 @@ jobs:
     
     - name: Install gomobile
       run: |
-        # Install gomobile and gobind
-        go install golang.org/x/mobile/cmd/gomobile@latest
-        go install golang.org/x/mobile/cmd/gobind@latest
+        # Set up GOPATH
+        export GOPATH=$HOME/go
+        export PATH=$PATH:$GOPATH/bin
         
-        # Add GOPATH/bin to PATH
-        export PATH=$PATH:$(go env GOPATH)/bin
+        # Clone golang.org/x/mobile to ensure bind package is available
+        mkdir -p $GOPATH/src/golang.org/x
+        cd $GOPATH/src/golang.org/x
+        git clone https://github.com/golang/mobile.git
+        cd mobile
         
-        # Verify installation
-        which gomobile
-        which gobind
+        # Install gomobile and gobind from source
+        go install ./cmd/gomobile
+        go install ./cmd/gobind
         
         # Initialize gomobile
         gomobile init
         
-        echo "✅ gomobile initialized"
+        echo "✅ gomobile initialized from source"
+        which gomobile
+        which gobind
     
     - name: Build iOS Framework
       run: |
-        export PATH=$PATH:$(go env GOPATH)/bin
+        export GOPATH=$HOME/go
+        export PATH=$PATH:$GOPATH/bin
         
         cd core/ios
         
-        # Add mobile/bind dependency to go.mod
-        go get golang.org/x/mobile/bind@latest
+        # Use the cloned mobile package
+        go mod edit -replace golang.org/x/mobile=$GOPATH/src/golang.org/x/mobile
         
         # Download all dependencies
         go mod tidy
