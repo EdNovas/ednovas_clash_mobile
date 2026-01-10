@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build ClashCore.xcframework for iOS
+# Build Clashcore.xcframework for iOS
 # Prerequisites: 
 #   - macOS with Xcode installed
 #   - Go 1.22+ installed
@@ -8,10 +8,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CORE_DIR="$SCRIPT_DIR/../core"
+CORE_IOS_DIR="$SCRIPT_DIR/../core/ios"
 OUTPUT_DIR="$SCRIPT_DIR/../ios/Frameworks"
 
-echo "🔧 Building ClashCore for iOS..."
+echo "🔧 Building Clashcore for iOS..."
 
 # Check prerequisites
 if ! command -v go &> /dev/null; then
@@ -28,7 +28,11 @@ fi
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-cd "$CORE_DIR"
+cd "$CORE_IOS_DIR"
+
+# Download dependencies
+echo "📦 Downloading dependencies..."
+go mod tidy
 
 echo "📦 Building xcframework..."
 
@@ -37,12 +41,12 @@ gomobile bind \
     -target=ios \
     -tags "with_gvisor" \
     -ldflags="-s -w" \
-    -o "$OUTPUT_DIR/ClashCore.xcframework" \
+    -o "$OUTPUT_DIR/Clashcore.xcframework" \
     .
 
-if [ -d "$OUTPUT_DIR/ClashCore.xcframework" ]; then
-    echo "✅ ClashCore.xcframework built successfully!"
-    echo "📍 Output: $OUTPUT_DIR/ClashCore.xcframework"
+if [ -d "$OUTPUT_DIR/Clashcore.xcframework" ]; then
+    echo "✅ Clashcore.xcframework built successfully!"
+    echo "📍 Output: $OUTPUT_DIR/Clashcore.xcframework"
     ls -la "$OUTPUT_DIR"
 else
     echo "❌ Build failed!"

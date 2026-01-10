@@ -220,18 +220,22 @@ jobs:
     
     - name: Build iOS Framework
       run: |
-        cd core
-        mkdir -p ../ios/Frameworks
+        cd core/ios
+        
+        # Download dependencies
+        go mod tidy
+        
+        mkdir -p ../../ios/Frameworks
         
         gomobile bind \
           -target=ios \
           -tags "with_gvisor" \
           -ldflags="-s -w" \
-          -o ../ios/Frameworks/ClashCore.xcframework \
+          -o ../../ios/Frameworks/Clashcore.xcframework \
           .
         
-        echo "✅ ClashCore.xcframework built successfully!"
-        ls -la ../ios/Frameworks/
+        echo "✅ Clashcore.xcframework built successfully!"
+        ls -la ../../ios/Frameworks/
     
     - name: Upload iOS Core Framework
       uses: actions/upload-artifact@v4

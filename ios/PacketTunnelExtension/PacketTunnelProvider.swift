@@ -1,5 +1,6 @@
 import NetworkExtension
 import os.log
+import Clashcore  // Go framework compiled by gomobile
 
 /// EdNovas Clash PacketTunnelProvider
 /// This class handles the VPN tunnel for the Clash proxy
@@ -111,33 +112,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return settings
     }
     
-    // MARK: - Clash Core Bridge (placeholders - implement with ClashCore.xcframework)
+    // MARK: - Clash Core Bridge
     
     private func startClashCore(config: String) -> String {
-        // TODO: Call ClashCore.Start(homeDir, config, fd)
-        // For now, return empty string to simulate success
         logger.info("Starting Clash Core with config length: \(config.count)")
         
-        // Uncomment when ClashCore.xcframework is integrated:
-        // return ClashCore.Start(getHomeDir(), config, getTunFd())
-        
-        return ""
+        // Call the Go function from Clashcore.xcframework
+        let result = ClashcoreStart(getHomeDir(), config)
+        return result ?? ""
     }
     
     private func stopClashCore() {
-        // TODO: Call ClashCore.Stop()
         logger.info("Stopping Clash Core")
-        
-        // Uncomment when ClashCore.xcframework is integrated:
-        // ClashCore.Stop()
+        _ = ClashcoreStop()
     }
     
     private func setClashMode(mode: String) {
-        // TODO: Call ClashCore.SetMode(mode)
         logger.info("Setting Clash mode to: \(mode)")
-        
-        // Uncomment when ClashCore.xcframework is integrated:
-        // ClashCore.SetMode(mode)
+        _ = ClashcoreSetMode(mode)
     }
     
     private func getHomeDir() -> String {
