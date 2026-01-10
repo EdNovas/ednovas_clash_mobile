@@ -380,22 +380,20 @@ jobs:
           echo "Extension Profile UUID: $EXT_PROFILE_UUID"
         fi
         
-        # Create archive with signing
+        # Create archive - let Xcode resolve provisioning from installed profiles
         xcodebuild -workspace Runner.xcworkspace \
           -scheme Runner \
           -configuration Release \
           -archivePath build/Runner.xcarchive \
           archive \
-          CODE_SIGN_STYLE=Manual \
-          CODE_SIGN_IDENTITY="Apple Distribution" \
-          DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-          PROVISIONING_PROFILE_SPECIFIER="$MAIN_PROFILE_UUID" \
-          -destination "generic/platform=iOS"
+          -allowProvisioningUpdates \
+          -destination "generic/platform=iOS" \
+          DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
         
         # Export IPA
         mkdir -p ../release
         
-        # Create export options plist
+        # Create export options plist with profile UUIDs
         cat > ExportOptions.plist << EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -407,12 +405,14 @@ jobs:
             <string>upload</string>
             <key>signingStyle</key>
             <string>manual</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
             <key>provisioningProfiles</key>
             <dict>
                 <key>com.ednovas.ednovasClashMobile</key>
-                <string>EdNovas Clash Dist</string>
+                <string>${MAIN_PROFILE_UUID}</string>
                 <key>com.ednovas.ednovasClashMobile.PacketTunnel</key>
-                <string>EdNovas PacketTunnel Dist</string>
+                <string>${EXT_PROFILE_UUID}</string>
             </dict>
         </dict>
         </plist>
