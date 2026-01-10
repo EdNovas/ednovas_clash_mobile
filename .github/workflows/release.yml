@@ -197,11 +197,139 @@ jobs:
         path: release/*.apk
         retention-days: 5
 
+  build-ios-core:
+    name: Build iOS Core Framework
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache-dependency-path: core/go.sum
+    
+    - name: Install gomobile
+      run: |
+        go install golang.org/x/mobile/cmd/gomobile@latest
+        gomobile init
+    
+    - name: Build iOS Framework
+      run: |
+        cd core
+        mkdir -p ../ios/Frameworks
+        
+        gomobile bind \
+          -target=ios \
+          -tags "with_gvisor" \
+          -ldflags="-s -w" \
+          -o ../ios/Frameworks/ClashCore.xcframework \
+          .
+        
+        echo "✅ ClashCore.xcframework built successfully!"
+        ls -la ../ios/Frameworks/
+    
+    - name: Upload iOS Core Framework
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-core-framework
+        path: ios/Frameworks/
+        retention-days: 1
+
+  build-ipa:
+    name: Build iOS IPA
+    needs: build-ios-core
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Download iOS Core Framework
+      uses: actions/download-artifact@v4
+      with:
+        name: ios-core-framework
+        path: ios/Frameworks/
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
+        channel: 'stable'
+        cache: true
+    
+    - name: Get Dependencies
+      run: flutter pub get
+    
+    - name: Setup iOS Signing
+      env:
+        IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+        IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+        IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+        IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+      run: |
+        # Skip if no iOS secrets configured
+        if [ -z "$IOS_CERTIFICATE_BASE64" ]; then
+          echo "⚠️ No iOS signing configured, skipping IPA build"
+          echo "SKIP_IOS=true" >> $GITHUB_ENV
+          exit 0
+        fi
+        
+        # Create temporary keychain
+        KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+        security create-keychain -p "$IOS_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+        security unlock-keychain -p "$IOS_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        
+        # Import certificate
+        echo "$IOS_CERTIFICATE_BASE64" | base64 -d > $RUNNER_TEMP/certificate.p12
+        security import $RUNNER_TEMP/certificate.p12 -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+        security list-keychain -d user -s $KEYCHAIN_PATH
+        
+        # Install provisioning profile
+        mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+        echo "$IOS_PROVISION_PROFILE_BASE64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+        
+        echo "✅ iOS signing configured"
+    
+    - name: Build iOS (No Codesign)
+      if: env.SKIP_IOS != 'true'
+      run: |
+        flutter build ios --release --no-codesign
+        echo "✅ iOS build completed (unsigned)"
+    
+    - name: Create Unsigned IPA
+      if: env.SKIP_IOS != 'true'
+      run: |
+        VERSION="${GITHUB_REF_NAME:-${{ github.event.inputs.version }}}"
+        VERSION="${VERSION#v}"
+        
+        mkdir -p release
+        cd build/ios/iphoneos
+        mkdir Payload
+        cp -r Runner.app Payload/
+        zip -r ../../../release/EdNovas-Clash-v${VERSION}-ios-unsigned.ipa Payload
+        
+        echo "✅ Unsigned IPA created"
+        ls -la ../../../release/
+    
+    - name: Upload IPA Artifact
+      if: env.SKIP_IOS != 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ipa-release
+        path: release/*.ipa
+        retention-days: 5
+
   release:
     name: Create GitHub Release
-    needs: build-apk
+    needs: [build-apk, build-ipa]
+    if: always() && needs.build-apk.result == 'success' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     
@@ -216,6 +344,13 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: apk-release
+        path: release/
+    
+    - name: Download IPA Artifacts
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: ipa-release
         path: release/
     
     - name: Generate Changelog
@@ -278,6 +413,12 @@ jobs:
           | 安装包 | x86_64 | 模拟器、部分平板 | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-x86_64.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-x86_64.apk) |
           | 通用包 | 全架构 | 所有设备（文件较大） | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-universal.apk) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-universal.apk) |
           
+          ### 🍎 iOS
+          
+          | 版本 | 说明 | 下载 |
+          |------|------|------|
+          | IPA (未签名) | 需要自签或 AltStore 安装 | [官方](https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-ios-unsigned.ipa) / [加速](https://github.ednovas.xyz/https://github.com/EdNovas/ednovas_clash_mobile/releases/download/${{ github.ref_name }}/EdNovas-Clash-${{ github.ref_name }}-ios-unsigned.ipa) |
+          
           ---
           
           ### 🔄 变更日志 / Changelog
@@ -290,7 +431,7 @@ jobs:
           - 本应用为 EdNovas 订阅服务专属 VPN 客户端
           - 需要有效的 EdNovas 账号才能使用
           - 首次使用请先在设置中登录账号
-        files: release/*.apk
+        files: release/*
         draft: false
         prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
       env:
