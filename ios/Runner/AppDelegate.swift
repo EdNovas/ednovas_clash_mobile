@@ -78,7 +78,7 @@ import NetworkExtension
         let manager = NETunnelProviderManager()
         
         let proto = NETunnelProviderProtocol()
-        proto.providerBundleIdentifier = "com.ednovas.ednovas_clash_mobile.PacketTunnel"
+        proto.providerBundleIdentifier = "com.ednovas.ednovasClashMobile.PacketTunnel"
         proto.serverAddress = "EdNovas Cloud"
         proto.providerConfiguration = [:]
         
