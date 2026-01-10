@@ -380,15 +380,30 @@ jobs:
           echo "Extension Profile UUID: $EXT_PROFILE_UUID"
         fi
         
-        # Create archive - let Xcode resolve provisioning from installed profiles
+        # Create xcconfig for manual signing
+        cat > signing.xcconfig << XCCONFIG
+        CODE_SIGN_STYLE = Manual
+        CODE_SIGN_IDENTITY = Apple Distribution
+        DEVELOPMENT_TEAM = ${APPLE_TEAM_ID}
+        
+        // Runner target
+        PROVISIONING_PROFILE_SPECIFIER[bundle-identifier=com.ednovas.ednovasClashMobile] = ${MAIN_PROFILE_UUID}
+        
+        // PacketTunnelExtension target  
+        PROVISIONING_PROFILE_SPECIFIER[bundle-identifier=com.ednovas.ednovasClashMobile.PacketTunnel*] = ${EXT_PROFILE_UUID}
+        XCCONFIG
+        
+        echo "=== Signing xcconfig ==="
+        cat signing.xcconfig
+        
+        # Create archive with manual signing
         xcodebuild -workspace Runner.xcworkspace \
           -scheme Runner \
           -configuration Release \
           -archivePath build/Runner.xcarchive \
           archive \
-          -allowProvisioningUpdates \
           -destination "generic/platform=iOS" \
-          DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+          -xcconfig signing.xcconfig
         
         # Export IPA
         mkdir -p ../release
