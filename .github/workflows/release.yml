@@ -380,30 +380,58 @@ jobs:
           echo "Extension Profile UUID: $EXT_PROFILE_UUID"
         fi
         
-        # Create xcconfig for manual signing
-        cat > signing.xcconfig << XCCONFIG
-        CODE_SIGN_STYLE = Manual
-        CODE_SIGN_IDENTITY = Apple Distribution
-        DEVELOPMENT_TEAM = ${APPLE_TEAM_ID}
+        # Install xcodeproj if needed
+        gem install xcodeproj --no-document || true
         
-        // Runner target
-        PROVISIONING_PROFILE_SPECIFIER[bundle-identifier=com.ednovas.ednovasClashMobile] = ${MAIN_PROFILE_UUID}
+        # Export variables for Ruby
+        export MAIN_UUID="$MAIN_PROFILE_UUID"
+        export EXT_UUID="$EXT_PROFILE_UUID"
+        export TEAM_ID="$APPLE_TEAM_ID"
         
-        // PacketTunnelExtension target  
-        PROVISIONING_PROFILE_SPECIFIER[bundle-identifier=com.ednovas.ednovasClashMobile.PacketTunnel*] = ${EXT_PROFILE_UUID}
-        XCCONFIG
+        # Configure signing using Ruby script
+        ruby << 'RUBY'
+        require 'xcodeproj'
         
-        echo "=== Signing xcconfig ==="
-        cat signing.xcconfig
+        project_path = 'Runner.xcodeproj'
+        project = Xcodeproj::Project.open(project_path)
         
-        # Create archive with manual signing
+        main_uuid = ENV['MAIN_UUID']
+        ext_uuid = ENV['EXT_UUID']
+        team_id = ENV['TEAM_ID']
+        
+        puts "Configuring signing with:"
+        puts "  Team ID: #{team_id}"
+        puts "  Main profile: #{main_uuid}"
+        puts "  Extension profile: #{ext_uuid}"
+        
+        project.targets.each do |target|
+          next if target.name.start_with?('Pods') # Skip Pods targets
+          
+          puts "Configuring target: #{target.name}"
+          target.build_configurations.each do |config|
+            config.build_settings['CODE_SIGN_STYLE'] = 'Manual'
+            config.build_settings['CODE_SIGN_IDENTITY'] = 'Apple Distribution'
+            config.build_settings['DEVELOPMENT_TEAM'] = team_id
+            
+            if target.name == 'Runner'
+              config.build_settings['PROVISIONING_PROFILE_SPECIFIER'] = main_uuid
+            elsif target.name == 'PacketTunnelExtension'
+              config.build_settings['PROVISIONING_PROFILE_SPECIFIER'] = ext_uuid
+            end
+          end
+        end
+        
+        project.save
+        puts "✅ Signing configured for all targets"
+        RUBY
+        
+        # Create archive
         xcodebuild -workspace Runner.xcworkspace \
           -scheme Runner \
           -configuration Release \
           -archivePath build/Runner.xcarchive \
           archive \
-          -destination "generic/platform=iOS" \
-          -xcconfig signing.xcconfig
+          -destination "generic/platform=iOS"
         
         # Export IPA
         mkdir -p ../release
