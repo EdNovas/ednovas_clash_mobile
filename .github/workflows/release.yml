@@ -360,20 +360,37 @@ jobs:
     
     - name: Archive and Export IPA
       if: env.SKIP_IOS != 'true'
+      env:
+        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       run: |
         VERSION="${GITHUB_REF_NAME:-${{ github.event.inputs.version }}}"
         VERSION="${VERSION#v}"
         
         cd ios
         
-        # Create archive
+        # Get main profile UUID
+        MAIN_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/main.mobileprovision
+        MAIN_PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< $(security cms -D -i "$MAIN_PROFILE_PATH"))
+        echo "Main Profile UUID: $MAIN_PROFILE_UUID"
+        
+        # Get extension profile UUID (if exists)
+        EXT_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/extension.mobileprovision
+        if [ -f "$EXT_PROFILE_PATH" ]; then
+          EXT_PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< $(security cms -D -i "$EXT_PROFILE_PATH"))
+          echo "Extension Profile UUID: $EXT_PROFILE_UUID"
+        fi
+        
+        # Create archive with signing
         xcodebuild -workspace Runner.xcworkspace \
           -scheme Runner \
           -configuration Release \
           -archivePath build/Runner.xcarchive \
           archive \
           CODE_SIGN_STYLE=Manual \
-          -allowProvisioningUpdates
+          CODE_SIGN_IDENTITY="Apple Distribution" \
+          DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+          PROVISIONING_PROFILE_SPECIFIER="$MAIN_PROFILE_UUID" \
+          -destination "generic/platform=iOS"
         
         # Export IPA
         mkdir -p ../release
