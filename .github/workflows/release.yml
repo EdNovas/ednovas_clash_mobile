@@ -215,6 +215,9 @@ jobs:
     
     - name: Install gomobile
       run: |
+        # Download and install the full golang.org/x/mobile package
+        go get -d golang.org/x/mobile/...
+        
         # Install gomobile and gobind
         go install golang.org/x/mobile/cmd/gomobile@latest
         go install golang.org/x/mobile/cmd/gobind@latest
@@ -223,18 +226,24 @@ jobs:
         which gomobile
         which gobind
         
-        # Initialize gomobile (downloads and builds necessary tools)
+        # Initialize gomobile with explicit GOPATH
+        export PATH=$PATH:$(go env GOPATH)/bin
         gomobile init
         
         echo "✅ gomobile initialized"
     
     - name: Build iOS Framework
       run: |
+        export PATH=$PATH:$(go env GOPATH)/bin
+        
         cd core/ios
         
         # Download dependencies
         go mod tidy
         go mod download
+        
+        # Also get the mobile/bind package in the context of our module
+        go get golang.org/x/mobile/bind
         
         mkdir -p ../../ios/Frameworks
         
@@ -287,6 +296,7 @@ jobs:
         IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
         IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
         IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+        IOS_EXTENSION_PROFILE_BASE64: ${{ secrets.IOS_EXTENSION_PROFILE_BASE64 }}
         IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
       run: |
         # Skip if no iOS secrets configured
@@ -307,9 +317,18 @@ jobs:
         security import $RUNNER_TEMP/certificate.p12 -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
         security list-keychain -d user -s $KEYCHAIN_PATH
         
-        # Install provisioning profile
+        # Install provisioning profiles
         mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-        echo "$IOS_PROVISION_PROFILE_BASE64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+        
+        # Main app profile
+        echo "$IOS_PROVISION_PROFILE_BASE64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/main.mobileprovision
+        echo "✅ Main app profile installed"
+        
+        # Extension profile (if provided)
+        if [ ! -z "$IOS_EXTENSION_PROFILE_BASE64" ]; then
+          echo "$IOS_EXTENSION_PROFILE_BASE64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/extension.mobileprovision
+          echo "✅ Extension profile installed"
+        fi
         
         echo "✅ iOS signing configured"
     

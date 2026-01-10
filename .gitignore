@@ -78,6 +78,16 @@ local.properties
 *.keystore
 key.properties
 
+# iOS Signing (NEVER commit these!)
+ios/keys/
+*.p12
+*.mobileprovision
+*.cer
+*.csr
+*.pem
+*_base64.txt
+distribution.*
+
 # Firebase
 google-services.json
 ios/Runner/GoogleService-Info.plist
