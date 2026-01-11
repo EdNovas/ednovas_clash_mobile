@@ -4,8 +4,8 @@
 
 <img src="assets/icon.png" width="120" alt="EdNovas云 Logo"/>
 
-![Version](https://img.shields.io/badge/version-v1.0.20-blue)
-![Platform](https://img.shields.io/badge/platform-Android-green)
+![Version](https://img.shields.io/badge/version-v1.0.0-blue)
+![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.24-02569B?logo=flutter)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -70,8 +70,8 @@ EdNovas云 是一款专为 [EdNovas](https://ednovas.com) 订阅用户设计的 
 
 - Flutter 3.24+
 - Go 1.22+
-- Android SDK & NDK r26b
-- Java 17
+- **Android**: Android SDK & NDK r26b, Java 17
+- **iOS**: Xcode 15+, macOS Sonoma+
 
 ### 本地编译
 
@@ -81,7 +81,9 @@ EdNovas云 是一款专为 [EdNovas](https://ednovas.com) 订阅用户设计的 
    cd ednovas_clash_mobile
    ```
 
-2. **编译 Go 核心库**
+2. **编译核心库**
+
+   **Android (Go → .so):**
    
    Windows (PowerShell):
    ```powershell
@@ -90,20 +92,33 @@ EdNovas云 是一款专为 [EdNovas](https://ednovas.com) 订阅用户设计的 
    
    Linux/macOS:
    ```bash
-   # 需要先设置 ANDROID_NDK_HOME 环境变量
    cd core
-   
-   # 编译 arm64-v8a
    CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
      CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
      go build -buildmode=c-shared -tags "with_gvisor,cmfa" -ldflags="-s -w" \
      -o ../android/app/src/main/jniLibs/arm64-v8a/libclash.so .
    ```
 
-3. **编译 Flutter APK**
+   **iOS (Go → .xcframework):**
+   ```bash
+   cd core
+   ./build_ios.sh
+   # 输出到: ios/Clashcore.xcframework/
+   ```
+
+3. **编译 Flutter App**
+   
+   **Android:**
    ```bash
    flutter pub get
    flutter build apk --release
+   ```
+   
+   **iOS:**
+   ```bash
+   flutter pub get
+   flutter build ios --release
+   # 然后在 Xcode 中: Product → Archive
    ```
 
 ### 项目结构
@@ -114,9 +129,15 @@ ednovas_clash_mobile/
 │   └── app/src/main/
 │       ├── kotlin/          # Kotlin VPN 服务
 │       └── jniLibs/         # 编译后的 .so 文件
+├── ios/                     # iOS 原生代码
+│   ├── Runner/              # Flutter iOS App
+│   ├── PacketTunnelExtension/ # Network Extension
+│   └── Clashcore.xcframework/ # 编译后的核心库
 ├── core/                    # Go 核心代码
-│   ├── lib.go              # JNI 接口
+│   ├── lib.go              # Android JNI 接口
+│   ├── ios/                # iOS C 接口
 │   ├── tun/                # TUN 模块
+│   ├── build_ios.sh        # iOS 构建脚本
 │   └── go.mod              # Go 依赖
 ├── lib/                     # Flutter 代码
 │   ├── main.dart           # 入口

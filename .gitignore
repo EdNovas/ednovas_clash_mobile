@@ -132,3 +132,31 @@ flutter_*.png
 linked_*.ds
 unlinked.ds
 unlinked_spec.ds
+
+# ---------------------------------
+# iOS Native Libraries (Too large for Git - rebuild from source)
+# ---------------------------------
+# These are compiled binaries that can be rebuilt using:
+# - Clashcore: cd core && ./build_ios.sh
+# - HevSocks5Tunnel: see docs/XCODE_HEV_SOCKS5_SETUP.md
+# - Leaf: not currently used
+
+ios/Clashcore.xcframework/
+ios/Leaf.xcframework/
+# HevSocks5Tunnel is small enough to keep, but uncomment if needed:
+# ios/HevSocks5Tunnel.xcframework/
+
+# Leaf build artifacts (Rust target directory)
+leaf/target/
+
+# Go build artifacts
+core/build/
+
+# Leaf project (not used in current build)
+leaf/
+
+# Tun2SocksKit (experimental, not used)
+Tun2SocksKit/
+
+# Agent workflows (local development)
+.agent/
