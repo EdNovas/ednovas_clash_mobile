@@ -1,6 +1,6 @@
 # 隐私政策 / Privacy Policy
 
-**最后更新：2024年12月**
+**最后更新：2025年1月**
 
 ## 中文版
 
@@ -35,7 +35,9 @@ EdNovas云 仅收集以下信息：
 
 ### 6. 联系方式
 
-如有隐私相关问题，请联系：support@ednovas.com
+如有隐私相关问题，请联系：ednovas@ednovas.tech
+
+网站：https://ednovas.org
 
 ---
 
@@ -72,4 +74,6 @@ You can at any time:
 
 ### 6. Contact
 
-For privacy concerns, please contact: support@ednovas.com
+For privacy concerns, please contact: ednovas@ednovas.tech
+
+Website: https://ednovas.org
