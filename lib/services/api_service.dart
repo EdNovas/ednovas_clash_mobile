@@ -226,10 +226,14 @@ class ApiService {
       try {
         print('🔐 登录尝试 $attempt/$maxRetries (节点: $baseUrl)');
 
+        print('📤 请求URL: $baseUrl/api/v1/passport/auth/login');
+        print('📤 请求数据: email=$email, password长度=${password.length}');
+        
         final response = await _dio.post(
           '/api/v1/passport/auth/login',
           data: {'email': email, 'password': password},
           options: Options(
+            contentType: Headers.jsonContentType,
             validateStatus: (status) => status! < 500,
             responseType: ResponseType.json,
             sendTimeout: const Duration(seconds: 15),

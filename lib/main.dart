@@ -14,7 +14,12 @@ import 'services/user_agent_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp();
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint('Firebase initialization failed: $e');
+    debugPrint('App will continue without Firebase analytics.');
+  }
 
   // Initialize UserAgentService to get version for all HTTP requests
   await UserAgentService().init();

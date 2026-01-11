@@ -2,7 +2,10 @@ module ednovas/clash/core/ios
 
 go 1.22.0
 
-require github.com/metacubex/mihomo v1.19.17
+require (
+	github.com/eycorsican/go-tun2socks v1.16.11
+	github.com/metacubex/mihomo v1.19.17
+)
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

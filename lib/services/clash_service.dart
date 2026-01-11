@@ -28,6 +28,72 @@ class ClashService {
 
   static const platform = MethodChannel('com.ednovas.clash/vpn');
 
+  /// Make an API request to Clash Core
+  /// On iOS: Uses IPC via MethodChannel to proxy requests through Network Extension
+  /// On other platforms: Uses direct HTTP to localhost
+  Future<String?> _clashApiRequest(String method, String path, {String? body}) async {
+    if (Platform.isIOS) {
+      // iOS: Must proxy through Network Extension
+      try {
+        final result = await platform.invokeMethod<String>('apiRequest', {
+          'method': method,
+          'path': path,
+          'body': body ?? '',
+        });
+        return result;
+      } catch (e) {
+        print('iOS API Proxy Error: $e');
+        return null;
+      }
+    } else {
+      // Other platforms: Direct HTTP
+      try {
+        final url = Uri.parse('http://127.0.0.1:9090$path');
+        http.Response response;
+        
+        switch (method.toUpperCase()) {
+          case 'GET':
+            response = await http.get(url, headers: UserAgentService().headers);
+            break;
+          case 'PUT':
+            response = await http.put(
+              url,
+              headers: {'Content-Type': 'application/json', ...UserAgentService().headers},
+              body: body,
+            );
+            break;
+          case 'POST':
+            response = await http.post(
+              url,
+              headers: {'Content-Type': 'application/json', ...UserAgentService().headers},
+              body: body,
+            );
+            break;
+          case 'DELETE':
+            response = await http.delete(url, headers: UserAgentService().headers);
+            break;
+          case 'PATCH':
+            response = await http.patch(
+              url,
+              headers: {'Content-Type': 'application/json', ...UserAgentService().headers},
+              body: body,
+            );
+            break;
+          default:
+            return null;
+        }
+        
+        if (response.statusCode == 204) {
+          return '{"success":true}';
+        }
+        return response.body;
+      } catch (e) {
+        print('Direct HTTP Error: $e');
+        return null;
+      }
+    }
+  }
+
   Future<void> start() async {
     await ResourceService.checkAndInstallMMDB();
     try {
@@ -64,6 +130,11 @@ class ClashService {
       configContent = removeKey(configContent, 'allow-lan');
       configContent = removeKey(configContent, 'unified-delay');
       configContent = removeKey(configContent, 'global-client-fingerprint');
+      configContent = removeKey(configContent, 'mixed-port');
+      configContent = removeKey(configContent, 'socks-port');
+      configContent = removeKey(configContent, 'port');
+      configContent = removeKey(configContent, 'redir-port');
+      configContent = removeKey(configContent, 'tproxy-port');
 
       // 2. Determine Log Path
       final supportDir = await getApplicationSupportDirectory();
@@ -79,13 +150,15 @@ secret: ''
 log-level: info
 log-file: '$logPath'
 ipv6: false
-allow-lan: false
+allow-lan: true
+mixed-port: 7890
+socks-port: 7891
 mode: $_currentMode
 unified-delay: true
 global-client-fingerprint: chrome
 
 tun:
-  enable: true
+  enable: false
   stack: gvisor
   auto-route: false
   auto-redirect: false
@@ -93,18 +166,23 @@ tun:
 
 sniffer:
   enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
   sniff:
-    TLS:
-      ports: [443]
     HTTP:
       ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
 ''';
 
       // 4. Construct DNS (Crucial for Mobile/Fake-IP)
       const String dnsConfig = '''
 dns:
   enable: true
-  listen: 0.0.0.0:1053
+  listen: 0.0.0.0:53
   ipv6: false
   default-nameserver:
     - 223.5.5.5
@@ -334,23 +412,24 @@ dns:
   Future<void> selectProxy(String groupName, String nodeName) async {
     try {
       final encodedGroup = Uri.encodeComponent(groupName);
-      final url = Uri.parse('http://127.0.0.1:9090/proxies/$encodedGroup');
+      final path = '/proxies/$encodedGroup';
+      final body = json.encode({'name': nodeName});
 
-      final response = await http.put(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          ...UserAgentService().headers,
-        },
-        body: json.encode({'name': nodeName}),
-      );
-
-      if (response.statusCode != 204) {
-        throw Exception('API Failed: ${response.statusCode} ${response.body}');
+      final result = await _clashApiRequest('PUT', path, body: body);
+      
+      if (result == null) {
+        throw Exception('API request failed - no response');
+      }
+      
+      // Check for error in response
+      final decoded = json.decode(result);
+      if (decoded is Map && decoded.containsKey('error')) {
+        throw Exception('API Failed: ${decoded['error']}');
       }
 
       // Update local cache if API success
       _updateLocalCache(groupName, nodeName);
+      print('Proxy selected: $groupName -> $nodeName');
     } catch (e) {
       print('Select Proxy Failed: $e');
       rethrow;
@@ -427,17 +506,13 @@ dns:
   // Test Clash API connection
   Future<bool> testClashApi() async {
     try {
-      final url = Uri.parse('http://127.0.0.1:9090/version');
-      final response = await http
-          .get(
-            url,
-            headers: UserAgentService().headers,
-          )
-          .timeout(const Duration(seconds: 3));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        print('Clash API Connected: Version ${data['version']}');
-        return true;
+      final result = await _clashApiRequest('GET', '/version');
+      if (result != null) {
+        final data = json.decode(result);
+        if (data is Map && data.containsKey('version')) {
+          print('Clash API Connected: Version ${data['version']}');
+          return true;
+        }
       }
       return false;
     } catch (e) {
@@ -447,22 +522,25 @@ dns:
   }
 
   // Get connection stats
+  // Note: /traffic is a streaming endpoint, using /connections for stats on iOS
   Future<Map<String, dynamic>> getTrafficStats() async {
     try {
-      final url = Uri.parse('http://127.0.0.1:9090/traffic');
-      final response = await http
-          .get(
-            url,
-            headers: UserAgentService().headers,
-          )
-          .timeout(const Duration(seconds: 3));
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
+      // Use /connections endpoint which returns proper JSON
+      final result = await _clashApiRequest('GET', '/connections');
+      if (result != null) {
+        final data = json.decode(result);
+        // Extract total upload/download from connections data
+        final downloadTotal = data['downloadTotal'] ?? 0;
+        final uploadTotal = data['uploadTotal'] ?? 0;
+        return {
+          'up': uploadTotal,
+          'down': downloadTotal,
+        };
       }
-      return {};
+      return {'up': 0, 'down': 0};
     } catch (e) {
       print('Get Traffic Stats Failed: $e');
-      return {};
+      return {'up': 0, 'down': 0};
     }
   }
 
@@ -512,9 +590,17 @@ dns:
 
   // --- Traffic Monitoring ---
 
-  // --- Traffic Monitoring ---
-
   Stream<Map<String, dynamic>> getTrafficStream() {
+    // WebSocket cannot connect to localhost services in Network Extension on iOS
+    if (Platform.isIOS) {
+      print('[Traffic] WebSocket traffic stream not available on iOS');
+      // Return a polling-based stream instead
+      return Stream.periodic(const Duration(seconds: 2), (_) async {
+        final stats = await getTrafficStats();
+        return stats;
+      }).asyncMap((future) => future);
+    }
+    
     try {
       final uri = Uri.parse('ws://127.0.0.1:9090/traffic');
       final channel = WebSocketChannel.connect(uri);

@@ -434,29 +434,56 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 0),
-          child: Column(
-            children: [
-              // 1. User Info Header
-              _buildHeader(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Responsive sizing based on screen height
+            final screenHeight = constraints.maxHeight;
+            final isSmallScreen = screenHeight < 600; // iPhone SE and similar
+            final isMediumScreen = screenHeight < 700;
+            
+            // Calculate responsive sizes
+            final buttonSize = isSmallScreen ? 140.0 : (isMediumScreen ? 170.0 : 200.0);
+            final iconSize = isSmallScreen ? 70.0 : (isMediumScreen ? 85.0 : 100.0);
+            final verticalSpacing = isSmallScreen ? 8.0 : 16.0;
+            final horizontalPadding = isSmallScreen ? 16.0 : 24.0;
+            
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight,
+                ),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // 1. User Info Header
+                      _buildHeader(),
+                      
+                      SizedBox(height: verticalSpacing),
 
-              const Spacer(),
+                      // 2. Big Connect Button (responsive size)
+                      _buildConnectButton(buttonSize: buttonSize, iconSize: iconSize),
+                      
+                      SizedBox(height: verticalSpacing),
 
-              // 2. Big Connect Button
-              _buildConnectButton(),
+                      // 3. Mode Switcher
+                      _buildModeSwitcher(),
 
-              const Spacer(),
+                      SizedBox(height: isSmallScreen ? 4 : 10),
 
-              // 3. Mode Switcher
-              _buildModeSwitcher(),
-
-              const Gap(10),
-
-              // 4. Compact Node Selector
-              _buildNodeSelectorBar(),
-            ],
-          ),
+                      // 4. Compact Node Selector
+                      _buildNodeSelectorBar(),
+                      
+                      // Bottom padding for safe area
+                      SizedBox(height: isSmallScreen ? 8 : 16),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -663,7 +690,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Widget _buildConnectButton() {
+  Widget _buildConnectButton({double buttonSize = 200, double iconSize = 100}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bool canConnect = _hasValidSubscription && _proxyGroups.isNotEmpty;
 
@@ -684,6 +711,9 @@ class _HomePageState extends State<HomePage> {
             ? (isDark ? Colors.grey[500] : Colors.grey[600])
             : (isDark ? Colors.grey[700] : Colors.grey[500]));
 
+    // Responsive progress indicator size
+    final progressSize = buttonSize * 1.2;
+
     return GestureDetector(
       onTap: _toggleConnect,
       behavior: HitTestBehavior.translucent,
@@ -698,10 +728,11 @@ class _HomePageState extends State<HomePage> {
         ],
         onPlay: (controller) => controller.repeat(reverse: true),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 200,
-              height: 200,
+              width: buttonSize,
+              height: buttonSize,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: LinearGradient(
@@ -728,14 +759,14 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   if (_isStarting)
                     SizedBox(
-                      width: 240,
-                      height: 240,
+                      width: progressSize,
+                      height: progressSize,
                       child: CircularProgressIndicator(
                           color: Colors.white.withOpacity(0.3), strokeWidth: 2),
                     ),
                   Icon(
                     Icons.power_settings_new,
-                    size: 100,
+                    size: iconSize,
                     color: iconColor,
                   ),
                 ],
@@ -752,6 +783,14 @@ class _HomePageState extends State<HomePage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
     final unitColor = isDark ? Colors.grey[400] : Colors.grey[600];
+    
+    // Responsive sizing
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 700;
+    final topMargin = isSmallScreen ? 20.0 : 40.0;
+    final horizontalPadding = isSmallScreen ? 24.0 : 32.0;
+    final verticalPadding = isSmallScreen ? 12.0 : 16.0;
+    final fontSize = isSmallScreen ? 20.0 : 24.0;
 
     Widget buildSpeedItem(IconData icon, Color color, int bytes) {
       String number = '0';
@@ -768,21 +807,21 @@ class _HomePageState extends State<HomePage> {
         children: [
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Icon(icon, size: 18, color: color),
+            child: Icon(icon, size: isSmallScreen ? 16 : 18, color: color),
           ),
-          const SizedBox(width: 6),
+          SizedBox(width: isSmallScreen ? 4 : 6),
           Text(
             number,
             style: GoogleFonts.outfit(
-                color: textColor, fontSize: 24, fontWeight: FontWeight.bold),
+                color: textColor, fontSize: fontSize, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(width: 4),
+          SizedBox(width: isSmallScreen ? 2 : 4),
           Padding(
             padding: const EdgeInsets.only(bottom: 5),
             child: Text(
               unit,
               style: GoogleFonts.outfit(
-                  color: unitColor, fontSize: 12, fontWeight: FontWeight.bold),
+                  color: unitColor, fontSize: isSmallScreen ? 10 : 12, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -793,8 +832,8 @@ class _HomePageState extends State<HomePage> {
       onTap: () {},
       behavior: HitTestBehavior.opaque,
       child: Container(
-        margin: const EdgeInsets.only(top: 40),
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+        margin: EdgeInsets.only(top: topMargin),
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: verticalPadding),
         decoration: BoxDecoration(
           color: isDark
               ? Colors.black.withOpacity(0.4)
@@ -829,8 +868,12 @@ class _HomePageState extends State<HomePage> {
   Widget _buildModeSwitcher() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final modes = ['Rule', 'Global', 'Direct'];
+    // Get screen size for responsive margins
+    final screenHeight = MediaQuery.of(context).size.height;
+    final verticalMargin = screenHeight < 700 ? 12.0 : 24.0;
+    
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 24),
+      margin: EdgeInsets.symmetric(vertical: verticalMargin),
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[200],
