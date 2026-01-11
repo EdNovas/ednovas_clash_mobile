@@ -45,6 +45,9 @@ jobs:
           chmod +x build_ios.sh
           ./build_ios.sh
           
+      - name: Get Flutter dependencies
+        run: flutter pub get
+          
       - name: Install CocoaPods
         run: |
           cd ios
@@ -87,9 +90,6 @@ jobs:
           echo -n "$RUNNER_PROFILE_BASE64" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/runner.mobileprovision
           echo -n "$EXTENSION_PROFILE_BASE64" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/extension.mobileprovision
           
-      - name: Get Flutter dependencies
-        run: flutter pub get
-        
       - name: Build iOS App
         run: flutter build ios --release --no-codesign
         
