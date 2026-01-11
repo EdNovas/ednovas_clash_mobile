@@ -234,7 +234,9 @@ class _LoginPageState extends State<LoginPage> {
                       ],
                       selected: {
                         themeService.themeMode == ThemeMode.system
-                            ? ThemeMode.dark
+                            ? (MediaQuery.platformBrightnessOf(context) == Brightness.dark
+                                ? ThemeMode.dark
+                                : ThemeMode.light)
                             : themeService.themeMode
                       },
                       onSelectionChanged: (Set<ThemeMode> newSelection) {
