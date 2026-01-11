@@ -1,0 +1,94 @@
+# Fastlane configuration for EdNovas Clash iOS
+
+default_platform(:ios)
+
+platform :ios do
+  
+  # 共用的 API Key 配置
+  def get_api_key
+    app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_CONTENT"],
+      is_key_content_base64: true,
+      in_house: false
+    )
+  end
+  
+  # 共用的构建配置
+  def build_ipa
+    build_app(
+      workspace: "Runner.xcworkspace",
+      scheme: "Runner",
+      export_method: "app-store",
+      output_directory: "./build",
+      output_name: "EdNovasClash.ipa",
+      clean: true,
+      export_options: {
+        provisioningProfiles: {
+          "com.ednovas.ednovasClashMobile" => "EdNovas Clash Distribution",
+          "com.ednovas.ednovasClashMobile.PacketTunnelExtension" => "EdNovas Clash Extension Distribution"
+        }
+      }
+    )
+  end
+
+  # ============================================
+  # TestFlight 发布（测试版本）
+  # ============================================
+  desc "Build and upload to TestFlight (Beta)"
+  lane :beta do
+    api_key = get_api_key
+    build_ipa
+    
+    upload_to_testflight(
+      api_key: api_key,
+      skip_waiting_for_build_processing: true,
+      skip_submission: false,
+      distribute_external: true,  # 分发给外部测试人员
+      groups: ["Public Beta Testers"],  # 测试组名称
+      changelog: ENV["CHANGELOG"] || "Bug fixes and improvements"
+    )
+    
+    puts "✅ Successfully uploaded to TestFlight!"
+  end
+
+  # ============================================
+  # App Store 发布（正式版本）
+  # ============================================
+  desc "Build and submit to App Store Review"
+  lane :release do
+    api_key = get_api_key
+    build_ipa
+    
+    # 上传到 App Store Connect 并提交审核
+    upload_to_app_store(
+      api_key: api_key,
+      skip_metadata: false,       # 上传元数据
+      skip_screenshots: true,     # 跳过截图（通常手动上传）
+      skip_binary_upload: false,  # 上传二进制文件
+      submit_for_review: true,    # 自动提交审核
+      automatic_release: true,    # 审核通过后自动发布
+      force: true,                # 跳过 HTML 确认
+      precheck_include_in_app_purchases: false,
+      submission_information: {
+        add_id_info_uses_idfa: false,
+        export_compliance_uses_encryption: true,
+        export_compliance_is_exempt: true,
+        export_compliance_contains_proprietary_cryptography: false,
+        export_compliance_contains_third_party_cryptography: true
+      }
+    )
+    
+    puts "✅ Successfully submitted to App Store Review!"
+  end
+
+  # ============================================
+  # 仅构建（不上传）
+  # ============================================
+  desc "Build only (no upload)"
+  lane :build do
+    build_ipa
+    puts "✅ Build completed! IPA at ./build/EdNovasClash.ipa"
+  end
+end
